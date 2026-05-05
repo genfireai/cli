@@ -4,11 +4,28 @@ Command-line interface for [GenFire](https://genfire.ai) — generate images, vi
 
 ## Install
 
+Pick whichever you prefer:
+
 ```bash
+# Homebrew (macOS / Linux)
+brew install genfireai/tap/genfire
+
+# Install script (auto-installs Node if needed)
+curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh
+
+# npm (requires Node 20+)
 npm install -g @genfire/cli
 ```
 
-Requires Node.js 20 or newer.
+Pin to a specific version:
+
+```bash
+brew install genfireai/tap/genfire    # always installs the latest stable
+curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.2.0
+npm install -g @genfire/cli@0.2.0
+```
+
+Requires Node.js 20 or newer for the npm and script paths. Homebrew installs Node automatically as a dependency.
 
 ## Quick start
 
@@ -145,6 +162,58 @@ open ./latest.mp4
 ## Configuration
 
 Persistent settings live at `~/.config/genfire/config.json` (or `%APPDATA%\genfire\config.json` on Windows). Override the API base URL with `GENFIRE_API_BASE_URL` for local development.
+
+## Troubleshooting
+
+If a command fails, the CLI prints a structured error like:
+
+```
+API error 401 (authentication_required): A Bearer token is required for this endpoint.
+```
+
+The first parenthetical (`authentication_required`) is the stable error code. The list below maps the most common ones to their fix.
+
+| Error code | What it means | Fix |
+|---|---|---|
+| `authentication_required` | No API key found, or the key was rejected | Run `genfire auth login`. If you set `GENFIRE_API_KEY`, confirm the value matches a current key on your developer page. |
+| `invalid_api_key` | The stored key was revoked or rotated | `genfire auth logout && genfire auth login` |
+| `cli_session_expired` | Browser approval took longer than 10 minutes | `genfire auth login` again |
+| `cli_session_pending` | You haven't clicked Approve in the browser yet | Click Approve at the URL the CLI printed |
+| `invalid_model` | The model id you passed isn't recognized | `genfire models list` (or `genfire models list -c image_generation`) to see valid ids |
+| `insufficient_credits` | Your balance is too low for this run | `genfire credits` to check balance, top up at https://genfire.ai/dashboard/credits |
+| `invalid_prompt` | Prompt was empty or malformed | Provide a non-empty prompt as a positional argument |
+| `invalid_count` | Image count is outside `1..4` | Use `-n 1` through `-n 4` |
+| `invalid_aspect_ratio` | Aspect ratio not supported by this model | `genfire models get <id>` to see supported ratios |
+| `upload_too_large` | File exceeds 5GB | Compress, trim, or split the source file |
+| `invalid_size_bytes` | Upload size header is wrong | Re-run; usually transient |
+| `cli_session_consumed` | Login session was already exchanged | `genfire auth login` to start a fresh session |
+| `wait_timeout` | The poll loop hit `--wait-timeout` before the run finished | The run is still going on the server. Check it with `genfire runs get <id>`. Increase `--wait-timeout 30m` next time. |
+| `download_failed` | Output URL was unreachable | Re-run `genfire runs output <id> -o <path>` to retry the download. Run is unaffected. |
+| `invalid_inputs` | Workflow `--inputs` JSON didn't parse or wasn't an object | Check the workflow's expected schema with `genfire workflow get <id>` |
+| `unknown_model` | Cost preview can't find pricing for that model | `genfire models pricing` to see priced models |
+| `not_authenticated` | (TUI only) You ran a slash command before `/login` | Run `/login` first |
+| `auth_denied` | You clicked Deny in the browser | Run `genfire auth login` again to retry |
+
+If a generation **submitted but failed**, the run still has an id — `genfire runs get <id>` will print the underlying provider error. Common provider errors:
+
+- `content_policy_violation` — the prompt was rejected by the model's safety filter. Rephrase and re-run.
+- `provider_timeout` — the upstream model took too long. Safe to re-run; you'll only be charged once thanks to idempotency keys.
+
+### Reporting bugs
+
+When filing an issue at [genfireai/cli](https://github.com/genfireai/cli/issues), include:
+
+1. The exact command you ran (redact any prompts containing private content)
+2. The full error output
+3. The output of `genfire --version`
+4. Your OS and Node version (`node --version`)
+5. Whether you're using the keychain (default) or `GENFIRE_DISABLE_KEYTAR=1`
+
+### Common environment problems
+
+- **`zsh: command not found: genfire`** — the global install didn't add `genfire` to your PATH. Check `npm config get prefix` and confirm its `bin/` is on your `$PATH`. The fix is usually `export PATH="$(npm config get prefix)/bin:$PATH"` in your shell rc file.
+- **Browser doesn't open during `auth login`** — pass `--no-browser` and copy the URL manually. Common in SSH sessions, WSL2, and some sandboxed environments.
+- **OS keychain unavailable** — on Linux without `libsecret-tools` installed, the CLI falls back to a chmod-600 file at `~/.config/genfire/credentials.json`. To install the keychain: `apt install libsecret-1-dev` (Debian/Ubuntu) or equivalent.
 
 ## License
 
