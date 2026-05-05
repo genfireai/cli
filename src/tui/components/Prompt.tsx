@@ -4,6 +4,7 @@ import Spinner from 'ink-spinner';
 import { useTuiStore } from '../store.js';
 import { dispatchSlash, listSlash, parseSlashLine, suggestSlash } from '../slash/registry.js';
 import { palette } from '../colors.js';
+import { pickerCandidateCount, pickerSelectedHandle } from './InfluencerPicker.js';
 
 export interface PromptProps {
   onSubmit?: (line: string) => void;
@@ -54,32 +55,94 @@ export function Prompt({ onSubmit }: PromptProps): React.ReactElement {
     }
   }, [draft, onSubmit, setDraft]);
 
+  /**
+   * Recompute the influencer-picker state from the latest draft. Picker opens
+   * when there is an unterminated `@<handle>` immediately before the cursor
+   * (cursor is always at end of draft). Closes when there's no active mention.
+   */
+  const refreshPicker = useCallback((latestDraft: string) => {
+    const store = useTuiStore.getState();
+    // Walk backwards from the end until whitespace, `@`, or start of string.
+    let i = latestDraft.length;
+    while (i > 0 && !/[\s]/.test(latestDraft[i - 1])) i--;
+    const segment = latestDraft.slice(i);
+    if (segment.startsWith('@')) {
+      const query = segment.slice(1);
+      // Only valid handle characters keep the picker open.
+      if (/^[a-zA-Z0-9_-]*$/.test(query)) {
+        const candidateCount = pickerCandidateCount();
+        const selectedIndex = store.picker.open ? Math.min(store.picker.selectedIndex, Math.max(0, candidateCount - 1)) : 0;
+        store.setPicker({
+          open: true,
+          atStart: i,
+          query,
+          selectedIndex
+        });
+        return;
+      }
+    }
+    if (store.picker.open) store.closePicker();
+  }, []);
+
   useInput((input, key) => {
-    // Ignore input while a command is running. Ctrl+C still works to abort
-    // the whole TUI from a busy state via Ctrl+C twice.
+    // Ctrl+C: pop the picker first, then clear the input, then exit.
     if (key.ctrl && input === 'c') {
+      const store = useTuiStore.getState();
+      if (store.picker.open) {
+        store.closePicker();
+        return;
+      }
       if (draft.length > 0) {
         replaceDraft('');
         return;
       }
-      useTuiStore.getState().requestExit();
+      store.requestExit();
       return;
     }
 
     if (busy) return;
 
+    const store = useTuiStore.getState();
+    const pickerOpen = store.picker.open;
+
+    if (key.escape) {
+      if (pickerOpen) {
+        store.closePicker();
+      }
+      return;
+    }
+
     if (key.return) {
+      if (pickerOpen) {
+        const handle = pickerSelectedHandle();
+        if (handle) {
+          // Replace the in-progress @<query> with @<handle> + space
+          const before = draft.slice(0, store.picker.atStart);
+          replaceDraft(before + '@' + handle + ' ');
+        }
+        store.closePicker();
+        return;
+      }
       void submitDraft();
       return;
     }
 
     if (key.tab) {
+      if (pickerOpen) {
+        // Tab also accepts the selected handle (matches dashboard convention).
+        const handle = pickerSelectedHandle();
+        if (handle) {
+          const before = draft.slice(0, store.picker.atStart);
+          replaceDraft(before + '@' + handle + ' ');
+        }
+        store.closePicker();
+        return;
+      }
       if (draft.startsWith('/')) {
         const matches = suggestSlash(draft);
         if (matches.length === 1) {
           replaceDraft('/' + matches[0] + ' ');
         } else if (matches.length > 1) {
-          const store = useTuiStore.getState();
           store.appendLog({ kind: 'info', text: matches.map((m) => '/' + m).join('  ') });
         }
       }
@@ -87,6 +150,11 @@ export function Prompt({ onSubmit }: PromptProps): React.ReactElement {
     }
 
     if (key.upArrow) {
+      if (pickerOpen) {
+        const next = Math.max(0, store.picker.selectedIndex - 1);
+        store.setPicker({ selectedIndex: next });
+        return;
+      }
       if (history.length === 0) return;
       const next = historyIndex === null ? history.length - 1 : Math.max(0, historyIndex - 1);
       setHistoryIndex(next);
@@ -95,6 +163,12 @@ export function Prompt({ onSubmit }: PromptProps): React.ReactElement {
     }
 
     if (key.downArrow) {
+      if (pickerOpen) {
+        const max = Math.max(0, pickerCandidateCount() - 1);
+        const next = Math.min(max, store.picker.selectedIndex + 1);
+        store.setPicker({ selectedIndex: next });
+        return;
+      }
       if (historyIndex === null) return;
       const next = historyIndex + 1;
       if (next >= history.length) {
@@ -108,12 +182,16 @@ export function Prompt({ onSubmit }: PromptProps): React.ReactElement {
     }
 
     if (key.backspace || key.delete) {
-      replaceDraft(draft.slice(0, -1));
+      const next = draft.slice(0, -1);
+      replaceDraft(next);
+      refreshPicker(next);
       return;
     }
 
     if (input && !key.ctrl && !key.meta) {
-      replaceDraft(draft + input);
+      const next = draft + input;
+      replaceDraft(next);
+      refreshPicker(next);
     }
   });
 

@@ -478,6 +478,28 @@ registerSlash({
   }
 });
 
+registerSlash({
+  name: 'influencers',
+  summary: 'List your trained influencers',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listInfluencers();
+    if (response.data.length === 0) {
+      log('No ready influencers. Train one in the dashboard at https://genfire.ai/dashboard/influencers', 'info');
+      return;
+    }
+    const rows = response.data.map((i) => [
+      '@' + (i.handle || '(unset)'),
+      i.display_name || '',
+      i.id,
+      i.source_type
+    ]);
+    log(fmtTable(rows, ['handle', 'name', 'id', 'source']), 'output');
+    log('Use in prompts: /generate image "@<handle> at a coffee shop"', 'info');
+  }
+});
+
 /**
  * Side effect: importing this file registers all built-in slash commands.
  */

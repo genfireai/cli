@@ -12,9 +12,10 @@ import { registerGenerateCommands } from './commands/generate.js';
 import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
+import { registerInfluencersCommand } from './commands/influencers.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 async function main(): Promise<void> {
   const program = new Command();
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
   registerRunsCommand(program);
   registerCostCommand(program);
   registerWorkflowCommands(program);
+  registerInfluencersCommand(program);
 
   // No subcommand + interactive terminal? Drop into the TUI shell.
   // No subcommand + piped/CI? Print help and exit (preserves scriptability).

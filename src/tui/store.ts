@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { GenFireClient, Run } from '@genfire/sdk';
+import type { GenFireClient, Influencer, Run } from '@genfire/sdk';
 
 export type LogEntryKind = 'system' | 'command' | 'output' | 'error' | 'success' | 'info';
 
@@ -32,6 +32,16 @@ export interface AccountSnapshot {
   credits: number;
 }
 
+export interface InfluencerPickerState {
+  open: boolean;
+  /** Cursor position in the input where `@` started — for replacement on select */
+  atStart: number;
+  /** Filter prefix typed after the `@` */
+  query: string;
+  /** Index into the filtered candidate list */
+  selectedIndex: number;
+}
+
 export interface TuiState {
   /** Connection / identity */
   client: GenFireClient | null;
@@ -48,6 +58,10 @@ export interface TuiState {
   /** Background jobs (for v0.3 multi-job mode — already wired up so we don't refactor later) */
   jobs: JobRecord[];
 
+  /** Influencer picker (triggered when user types `@` in the prompt) */
+  picker: InfluencerPickerState;
+  influencerCache: Influencer[] | null;
+
   /** Actions */
   setClient: (client: GenFireClient | null, source: 'env' | 'stored' | 'none', baseUrl: string) => void;
   setAccount: (account: AccountSnapshot | null) => void;
@@ -60,6 +74,10 @@ export interface TuiState {
   upsertJob: (job: Partial<JobRecord> & { id: string; label: string; status: JobStatus; startedAt?: number }) => void;
   updateJob: (id: string, patch: Partial<JobRecord>) => void;
   removeJob: (id: string) => void;
+
+  setPicker: (state: Partial<InfluencerPickerState>) => void;
+  closePicker: () => void;
+  setInfluencerCache: (list: Influencer[] | null) => void;
 }
 
 let logSeq = 0;
@@ -80,6 +98,9 @@ export const useTuiStore = create<TuiState>((set) => ({
   inputDraft: '',
 
   jobs: [],
+
+  picker: { open: false, atStart: -1, query: '', selectedIndex: 0 },
+  influencerCache: null,
 
   setClient: (client, source, baseUrl) =>
     set(() => ({ client, authSource: source, baseUrl })),
@@ -141,7 +162,16 @@ export const useTuiStore = create<TuiState>((set) => ({
     })),
 
   removeJob: (id) =>
-    set((state) => ({ jobs: state.jobs.filter((entry) => entry.id !== id) }))
+    set((state) => ({ jobs: state.jobs.filter((entry) => entry.id !== id) })),
+
+  setPicker: (next) =>
+    set((state) => ({ picker: { ...state.picker, ...next } })),
+
+  closePicker: () =>
+    set(() => ({ picker: { open: false, atStart: -1, query: '', selectedIndex: 0 } })),
+
+  setInfluencerCache: (list) =>
+    set(() => ({ influencerCache: list }))
 }));
 
 export interface AppendLogParams {

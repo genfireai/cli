@@ -5,6 +5,7 @@ import { Header } from './components/Header.js';
 import { LogView } from './components/LogView.js';
 import { JobsPanel } from './components/JobsPanel.js';
 import { Prompt } from './components/Prompt.js';
+import { InfluencerPicker } from './components/InfluencerPicker.js';
 import { applyAuthToStore } from './session.js';
 import { useTuiStore } from './store.js';
 import './slash/commands.js';
@@ -44,8 +45,9 @@ export function App(): React.ReactElement {
       <Header />
       <LogView />
       <JobsPanel />
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Prompt />
+        <InfluencerPicker />
       </Box>
     </Box>
   );

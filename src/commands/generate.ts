@@ -11,6 +11,7 @@ import {
   resolveMediaInput,
   waitForRun
 } from '../runHelpers.js';
+import { resolveMentionFromPrompt } from './influencers.js';
 
 interface CommonGenerateOptions {
   output?: string;
@@ -93,14 +94,15 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('image <prompt>')
-      .description('Generate one or more images from a prompt')
+      .description('Generate one or more images from a prompt. Use @<handle> to reference a trained influencer.')
   )
     .option('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, e.g. 1:1, 16:9')
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
+    .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; count?: string; image?: string;
+      model?: string; aspectRatio?: string; count?: string; image?: string; influencer?: string;
     }) => {
       const client = await createClient();
       const count = Number(opts.count);
@@ -108,13 +110,25 @@ export function registerGenerateCommands(program: Command): void {
         throw new CliError('--count must be an integer 1-4', 'invalid_count');
       }
       const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
+
+      // Resolve mention: explicit --influencer wins; otherwise scan prompt for @<handle>.
+      let mentions: Array<{ handle: string; influencer_id: string }> | undefined;
+      if (opts.influencer) {
+        const explicit = await client.getInfluencer(opts.influencer);
+        mentions = [{ handle: explicit.handle, influencer_id: explicit.id }];
+      } else {
+        const fromPrompt = await resolveMentionFromPrompt(prompt, client);
+        if (fromPrompt) mentions = [fromPrompt];
+      }
+
       const run = await client.createImageGeneration(
         {
           prompt,
           model: opts.model,
           aspect_ratio: opts.aspectRatio,
           count,
-          image_url: imageUrl
+          image_url: imageUrl,
+          mentions
         },
         { idempotencyKey: randomUUID() }
       );

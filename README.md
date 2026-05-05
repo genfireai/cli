@@ -121,6 +121,26 @@ genfire workflow run  storyboard --inputs vars.json -o results/
 
 `--inputs` accepts either a path to a JSON file or a literal JSON string.
 
+### Influencers
+
+Train influencer characters in the [GenFire dashboard](https://genfire.ai/dashboard/influencers), then reference them in CLI prompts with `@<handle>` to inject identity-preserving conditioning. The CLI auto-switches to the model's edit variant and adds the influencer's reference photos behind the scenes.
+
+```bash
+genfire influencers list                    # show your ready influencers
+genfire influencers get <influencerId>      # full details
+
+# Reference an influencer in any image generation:
+genfire generate image "@sarah at a coffee shop" -o sarah.png
+genfire generate image "..." --influencer <id> -o out.png   # explicit alternative
+```
+
+In the interactive shell (`genfire`), typing `@` opens a live picker — arrow keys navigate, Enter or Tab inserts the handle, Esc cancels.
+
+Notes:
+- Only influencers in `ready` status can be referenced. Train and finalize them in the dashboard first.
+- Currently one mention per request.
+- Mention support requires a model with an internal edit variant (most do — see `genfire models list`). Pass `--model` to override the default.
+
 ### Models
 
 ```bash
