@@ -10,6 +10,7 @@ import { CliError } from '../errors.js';
 import { readConfig, resolveApiKey, resolveBaseUrl } from '../config.js';
 import { deleteCredentials, getFallbackPath, isUsingKeychain, saveCredentials } from '../credentials.js';
 import { generatePkcePair } from '../pkce.js';
+import { VERSION, checkLatestVersion } from '../versionCheck.js';
 import { bold, cyan, dim, green, printResult, red, yellow } from '../output.js';
 
 const CLI_CLIENT_ID = 'genfire-cli';
@@ -189,6 +190,17 @@ export function registerAuthCommands(program: Command): void {
           }
         }
       );
+
+      // Best-effort version check. If we're behind the latest release, surface
+      // it now so users on a stale build know to upgrade — common cause of
+      // "missing scope" errors when the CLI added new defaults in a patch.
+      const versionCheck = await checkLatestVersion(VERSION);
+      if (versionCheck?.isOutdated) {
+        process.stderr.write(
+          `${yellow('Update available:')} CLI v${versionCheck.installed} installed, v${versionCheck.latest} available.\n` +
+          `${dim('Run')} npm install -g @genfire/cli@latest ${dim('to upgrade — newer versions may grant additional scopes by default.')}\n`
+        );
+      }
     });
 
   auth
