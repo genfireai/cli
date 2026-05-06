@@ -15,7 +15,7 @@ import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 async function main(): Promise<void> {
   const program = new Command();

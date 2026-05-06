@@ -36,6 +36,17 @@ genfire models list         # see available models
 genfire generate image "a neon-lit alley at dusk" -o alley.png
 ```
 
+## Use with Claude Code
+
+After installing the CLI, install the GenFire Skills bundle inside Claude Code:
+
+```
+/plugin marketplace add genfireai/skills
+/plugin install genfire@genfire
+```
+
+Then ask Claude in plain English — *"generate a hero image of a neon-lit alley"*, *"run the storyboard workflow with these inputs"*, *"what's my credit balance?"* — and Claude runs the right `genfire` command for you. See [genfireai/skills](https://github.com/genfireai/skills) for what's bundled.
+
 ## Interactive shell
 
 Run `genfire` with no arguments to drop into an interactive TUI with slash commands, autocomplete, command history, and a live job tracker:

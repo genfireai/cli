@@ -19,6 +19,25 @@ const CLI_CLIENT_ID = 'genfire-cli';
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_MS = 10 * 60 * 1000;
 
+/** Mirror of CLI_DEFAULT_SCOPES in commands/auth.ts. Keep these in sync. */
+const CLI_DEFAULT_SCOPES = [
+  'account:read',
+  'credits:read',
+  'models:read',
+  'runs:read',
+  'images:write',
+  'videos:write',
+  'audio:write',
+  'lipsync:write',
+  'products:write',
+  'workflows:read',
+  'workflows:write',
+  'batches:read',
+  'batches:write',
+  'uploads:write',
+  'influencers:read'
+] as const;
+
 export interface LoginOptions {
   apiKey?: string;
   noBrowser?: boolean;
@@ -138,6 +157,7 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
       codeChallenge: pkce.codeChallenge,
       codeChallengeMethod: pkce.codeChallengeMethod,
       label: options.label || deviceLabel(),
+      scopes: CLI_DEFAULT_SCOPES as unknown as Parameters<typeof startCliAuthSession>[0]['scopes'],
       baseUrl
     });
   } catch (err) {

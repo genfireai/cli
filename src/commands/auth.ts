@@ -16,6 +16,30 @@ const CLI_CLIENT_ID = 'genfire-cli';
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_MS = 10 * 60 * 1000;
 
+/**
+ * Scopes the CLI requests by default during browser auth. We intentionally
+ * ask for the full generation surface so users don't hit "scope missing"
+ * errors when they switch from `generate image` to `generate video`. Users
+ * can still mint narrower keys manually via the dashboard.
+ */
+const CLI_DEFAULT_SCOPES = [
+  'account:read',
+  'credits:read',
+  'models:read',
+  'runs:read',
+  'images:write',
+  'videos:write',
+  'audio:write',
+  'lipsync:write',
+  'products:write',
+  'workflows:read',
+  'workflows:write',
+  'batches:read',
+  'batches:write',
+  'uploads:write',
+  'influencers:read'
+] as const;
+
 async function tryOpenBrowser(url: string): Promise<boolean> {
   try {
     const mod = await import('open');
@@ -103,6 +127,7 @@ export function registerAuthCommands(program: Command): void {
         codeChallenge: pkce.codeChallenge,
         codeChallengeMethod: pkce.codeChallengeMethod,
         label: options.label,
+        scopes: CLI_DEFAULT_SCOPES as unknown as Parameters<typeof startCliAuthSession>[0]['scopes'],
         baseUrl
       });
 
