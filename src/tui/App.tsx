@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Box, Static } from 'ink';
+import { Box } from 'ink';
 import { Splash } from './components/Splash.js';
 import { Header } from './components/Header.js';
 import { LogView } from './components/LogView.js';
@@ -39,9 +39,7 @@ export function App(): React.ReactElement {
 
   return (
     <Box flexDirection="column">
-      <Static items={[{ id: 'splash' }]}>
-        {() => <Splash key="splash" />}
-      </Static>
+      <Splash />
       <Header />
       <LogView />
       <JobsPanel />
