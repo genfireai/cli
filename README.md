@@ -87,6 +87,18 @@ Sign out and clear stored credentials:
 genfire auth logout
 ```
 
+### MCP setup
+
+After logging in, one command configures the GenFire MCP server in your AI client — no manual key pasting:
+
+```bash
+genfire mcp setup                         # Claude Code (default)
+genfire mcp setup --client claude-desktop
+genfire mcp setup --client cursor
+```
+
+This reads the key from your keychain and writes the correct MCP config. Restart your client, then run `/mcp` (Claude Code) or check MCP settings to confirm 22 tools are connected.
+
 ## Commands
 
 ### Generate
