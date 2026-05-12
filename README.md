@@ -21,8 +21,8 @@ Pin to a specific version:
 
 ```bash
 brew install genfireai/tap/genfire    # always installs the latest stable
-curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.2.0
-npm install -g @genfire/cli@0.2.0
+curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.3.4
+npm install -g @genfire/cli@0.3.4
 ```
 
 Requires Node.js 20 or newer for the npm and script paths. Homebrew installs Node automatically as a dependency.
@@ -104,7 +104,7 @@ This reads the key from your keychain and writes the correct MCP config. Restart
 ### Generate
 
 ```bash
-genfire generate image   <prompt> [-m model] [-a 16:9] [-n 4] [-i ref.png] [-o out.png]
+genfire generate image   <prompt> [-m model] [-a 16:9] [-n 4] [-i ref.png] [--quality high] [--resolution 2K] [-o out.png]
 genfire generate video   <prompt> [-m model] [-d 8] [-i first-frame.png] [-o out.mp4]
 genfire generate speech  <text>   --voice-id <id> [--format mp3_44100_128] [-o speech.mp3]
 genfire generate music   <prompt> [-d 30] [--instrumental] [-o track.mp3]
@@ -114,6 +114,13 @@ genfire generate upload  <path>   # raw upload, prints the asset URL
 ```
 
 Every media flag (`--image`, `--video`, `--audio`) accepts either an `https://` URL or a local file path. Local files are uploaded automatically before the generation runs.
+
+Model-specific image flags:
+
+| Flag | Values | Applies to |
+|---|---|---|
+| `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2` only. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. |
+| `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2` edit only (when `--image` is supplied). Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
 
 ### Cost preview
 

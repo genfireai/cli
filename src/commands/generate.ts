@@ -101,8 +101,11 @@ export function registerGenerateCommands(program: Command): void {
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
     .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
+    .option('--quality <level>', 'Image quality: low, medium, high, auto (image.gpt_image_2 only)')
+    .option('--resolution <res>', 'Output resolution: 1K, 2K, 4K (image.nano_banana_2 edit only)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; aspectRatio?: string; count?: string; image?: string; influencer?: string;
+      quality?: string; resolution?: string;
     }) => {
       const client = await createClient();
       const count = Number(opts.count);
@@ -121,6 +124,16 @@ export function registerGenerateCommands(program: Command): void {
         if (fromPrompt) mentions = [fromPrompt];
       }
 
+      const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
+      const VALID_RESOLUTIONS = new Set(['1K', '2K', '4K']);
+
+      if (opts.quality && !VALID_QUALITIES.has(opts.quality)) {
+        throw new CliError('--quality must be one of: low, medium, high, auto', 'invalid_quality');
+      }
+      if (opts.resolution && !VALID_RESOLUTIONS.has(opts.resolution)) {
+        throw new CliError('--resolution must be one of: 1K, 2K, 4K', 'invalid_resolution');
+      }
+
       const run = await client.createImageGeneration(
         {
           prompt,
@@ -128,7 +141,9 @@ export function registerGenerateCommands(program: Command): void {
           aspect_ratio: opts.aspectRatio,
           count,
           image_url: imageUrl,
-          mentions
+          mentions,
+          quality: opts.quality as 'low' | 'medium' | 'high' | 'auto' | undefined,
+          resolution: opts.resolution as '1K' | '2K' | '4K' | undefined
         },
         { idempotencyKey: randomUUID() }
       );

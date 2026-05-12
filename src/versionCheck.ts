@@ -2,7 +2,7 @@
  * Single source of truth for the installed CLI version. Bumped per release.
  * Other modules import VERSION from here instead of duplicating the literal.
  */
-export const VERSION = '0.3.3';
+export const VERSION = '0.3.4';
 
 /**
  * Best-effort check against npm to warn if the installed CLI is behind the
