@@ -21,8 +21,8 @@ Pin to a specific version:
 
 ```bash
 brew install genfireai/tap/genfire    # always installs the latest stable
-curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.3.4
-npm install -g @genfire/cli@0.3.4
+curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.3.5
+npm install -g @genfire/cli@0.3.5
 ```
 
 Requires Node.js 20 or newer for the npm and script paths. Homebrew installs Node automatically as a dependency.
@@ -120,7 +120,7 @@ Model-specific image flags:
 | Flag | Values | Applies to |
 |---|---|---|
 | `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2` only. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. |
-| `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2` edit only (when `--image` is supplied). Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
+| `--resolution` | `1K` `2K` `4K` | Nano Banana family edit only (`image.nano_banana`, `image.nano_banana_2`, `image.nano_banana_pro`) — supply `--image` or `@<handle>` to route through the edit path. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
 
 ### Cost preview
 
