@@ -13,6 +13,7 @@ import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
+import { registerVoicesCommand } from './commands/voices.js';
 import { registerMcpCommand } from './commands/mcp.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   registerCostCommand(program);
   registerWorkflowCommands(program);
   registerInfluencersCommand(program);
+  registerVoicesCommand(program);
   registerMcpCommand(program);
 
   // No subcommand + interactive terminal? Drop into the TUI shell.
