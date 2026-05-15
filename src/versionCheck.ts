@@ -1,8 +1,20 @@
+import { createRequire } from 'node:module';
+
 /**
- * Single source of truth for the installed CLI version. Bumped per release.
- * Other modules import VERSION from here instead of duplicating the literal.
+ * The installed CLI version, read from package.json at load time so it can
+ * never drift from the published version. package.json is always present in
+ * the installed package (it's the manifest), and is one level up from the
+ * compiled dist/ output. Other modules import VERSION from here instead of
+ * duplicating the literal.
+ *
+ * Previously this was a hand-maintained literal that was not bumped per
+ * release — it reported 0.3.4 while package.json was 0.3.6, which both
+ * mis-reported `--version` and made the freshest build warn its own users
+ * that they were "outdated".
  */
-export const VERSION = '0.3.4';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version?: string };
+export const VERSION = typeof pkg.version === 'string' ? pkg.version : '0.0.0';
 
 /**
  * Best-effort check against npm to warn if the installed CLI is behind the
