@@ -207,6 +207,56 @@ export function registerGenerateCommands(program: Command): void {
       await maybeFinish(client, run.id, 'speech', opts);
     });
 
+  // ---- transcribe ----
+  generate
+    .command('transcribe <url>')
+    .description('Transcribe audio/video to text (Whisper). Accepts a direct audio/video URL or a YouTube URL.')
+    .option('-m, --model <model>', 'Transcription model alias')
+    .option('--video', 'Treat the URL as a video source (extract audio before transcribing)')
+    .option('--youtube', 'Treat the URL as a YouTube link')
+    .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
+    .option('--wait-interval <duration>', 'Polling interval while waiting', '3s')
+    .action(async (url: string, opts: {
+      model?: string; video?: boolean; youtube?: boolean;
+      waitTimeout: string; waitInterval: string;
+    }) => {
+      const client = await createClient();
+      const body = opts.youtube
+        ? { youtube_url: url, model: opts.model }
+        : opts.video
+          ? { video_url: url, model: opts.model }
+          : { audio_url: url, model: opts.model };
+
+      const run = await client.createTranscription(body, { idempotencyKey: randomUUID() });
+
+      process.stderr.write(`${dim(`Polling run ${run.id}...`)}\n`);
+      const finished = await waitForRun(client, run.id, {
+        intervalMs: parseDurationSeconds(opts.waitInterval, '--wait-interval'),
+        timeoutMs: parseDurationSeconds(opts.waitTimeout, '--wait-timeout'),
+        onTick: (current, elapsed) => {
+          if (current.status !== 'completed' && current.status !== 'failed') {
+            process.stderr.write(`${dim(`  status=${current.status} elapsed=${Math.round(elapsed / 1000)}s\r`)}`);
+          }
+        }
+      });
+      process.stderr.write('\n');
+
+      if (finished.status !== 'completed') {
+        throw new CliError(
+          `Transcription run ${finished.id} ${finished.status}${finished.error ? `: ${finished.error.message}` : ''}`,
+          'transcription_failed'
+        );
+      }
+
+      const output = (finished.output || {}) as { text?: string };
+      // Default: print the transcript text to stdout (pipe-friendly).
+      // With the global --json flag, printResult emits the full run JSON
+      // (text + words + segments + language).
+      printResult(finished, () => {
+        process.stdout.write(`${output.text || ''}\n`);
+      });
+    });
+
   // ---- music ----
   commonOptions(
     generate
