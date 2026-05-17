@@ -139,6 +139,28 @@ genfire runs get    <runId>
 genfire runs output <runId>  [-o downloads/]
 ```
 
+### Batches
+
+Run up to 50 generations (or workflow executions) as one job, processed in parallel. Each item becomes its own run; one item failing doesn't stop the rest.
+
+```bash
+genfire batch create --mode operation --target images.generations.create --items items.json -c 3 -o out/
+genfire batch list           [-s completed] [-m operation] [-l 50]
+genfire batch get   <batchId>
+genfire batch items <batchId> [-o out/]
+```
+
+`--items` accepts a path to a JSON file or a literal JSON array. Each entry is either `{ "input": { ... } }` or a bare input object (auto-wrapped). For image batches, set `quality` per item (`low` | `medium` | `high` | `auto`) — `image.gpt_image_2` defaults to `high`, which costs 22× a `low` image, and that multiplies across every item:
+
+```json
+[
+  { "input": { "prompt": "a red fox in snow", "model": "image.gpt_image_2", "quality": "low" } },
+  { "input": { "prompt": "a blue jay on a branch", "model": "image.gpt_image_2", "quality": "low" } }
+]
+```
+
+`batch create` waits and polls by default (use `--no-wait` to submit and exit); completed item outputs download into `out/item-<index>/`.
+
 ### Workflows
 
 GenFire's workflow system lets you chain multiple generations into one pipeline. Use `genfire workflow` to run published workflows from the CLI:

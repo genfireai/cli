@@ -9,6 +9,7 @@ import { registerAccountCommand } from './commands/account.js';
 import { registerModelsCommand } from './commands/models.js';
 import { registerCreditsCommand } from './commands/credits.js';
 import { registerGenerateCommands } from './commands/generate.js';
+import { registerBatchCommands } from './commands/batch.js';
 import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
   registerCreditsCommand(program);
   registerModelsCommand(program);
   registerGenerateCommands(program);
+  registerBatchCommands(program);
   registerRunsCommand(program);
   registerCostCommand(program);
   registerWorkflowCommands(program);
