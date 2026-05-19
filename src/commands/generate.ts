@@ -99,12 +99,17 @@ export function registerGenerateCommands(program: Command): void {
     .option('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, e.g. 1:1, 16:9')
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
-    .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
+    .option(
+      '-i, --image <urlOrPath>',
+      'Reference image URL or local path (auto-uploaded). Repeat -i for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3).',
+      (value: string, previous: string[]) => previous.concat([value]),
+      [] as string[]
+    )
     .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
     .option('--quality <level>', 'Image quality: low, medium, high, auto (image.gpt_image_2 only)')
     .option('--resolution <res>', 'Output resolution: 1K, 2K, 4K (nano-banana family edit only — supply --image or @<handle>)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; count?: string; image?: string; influencer?: string;
+      model?: string; aspectRatio?: string; count?: string; image?: string[]; influencer?: string;
       quality?: string; resolution?: string;
     }) => {
       const client = await createClient();
@@ -112,7 +117,16 @@ export function registerGenerateCommands(program: Command): void {
       if (!Number.isInteger(count) || count < 1 || count > 4) {
         throw new CliError('--count must be an integer 1-4', 'invalid_count');
       }
-      const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
+      const imageInputs = opts.image ?? [];
+      if (imageInputs.length > 14) {
+        throw new CliError('At most 14 -i/--image inputs are allowed for a multi-image edit', 'too_many_images');
+      }
+      const resolvedImageUrls: string[] = [];
+      for (const input of imageInputs) {
+        resolvedImageUrls.push((await resolveMediaInput(client, input)).url);
+      }
+      const imageUrl = resolvedImageUrls.length === 1 ? resolvedImageUrls[0] : undefined;
+      const imageUrls = resolvedImageUrls.length > 1 ? resolvedImageUrls : undefined;
 
       // Resolve mention: explicit --influencer wins; otherwise scan prompt for @<handle>.
       let mentions: Array<{ handle: string; influencer_id: string }> | undefined;
@@ -141,6 +155,7 @@ export function registerGenerateCommands(program: Command): void {
           aspect_ratio: opts.aspectRatio,
           count,
           image_url: imageUrl,
+          image_urls: imageUrls,
           mentions,
           quality: opts.quality as 'low' | 'medium' | 'high' | 'auto' | undefined,
           resolution: opts.resolution as '1K' | '2K' | '4K' | undefined
