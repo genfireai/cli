@@ -279,11 +279,14 @@ export function registerGenerateCommands(program: Command): void {
       .description('Generate music from a prompt')
   )
     .option('-m, --model <model>', 'Music model alias')
-    .option('-d, --duration <seconds>', 'Duration in seconds')
+    .option('-d, --duration <seconds>', 'Duration in seconds (ElevenLabs models only)')
     .option('--format <format>', 'Output format')
-    .option('--instrumental', 'Force an instrumental (no vocals)')
+    .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs models only)')
+    .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3 Pro only)')
+    .option('--negative-prompt <text>', 'What to exclude from the audio (Lyria 3 Pro only)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; duration?: string; format?: string; instrumental?: boolean;
+      imageUrl?: string; negativePrompt?: string;
     }) => {
       const client = await createClient();
       const run = await client.createMusic(
@@ -292,7 +295,9 @@ export function registerGenerateCommands(program: Command): void {
           model: opts.model,
           duration_seconds: opts.duration ? Number(opts.duration) : undefined,
           output_format: opts.format,
-          force_instrumental: opts.instrumental
+          force_instrumental: opts.instrumental,
+          image_url: opts.imageUrl,
+          negative_prompt: opts.negativePrompt
         },
         { idempotencyKey: randomUUID() }
       );

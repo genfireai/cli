@@ -352,6 +352,7 @@ registerSlash({
     const duration = flag('-d') || flag('--duration');
     const count = flag('-n') || flag('--count');
     const voiceId = flag('--voice-id');
+    const negativePrompt = flag('--negative-prompt');
 
     const imageUrl = imagePath ? (await resolveMediaInput(client, imagePath)).url : undefined;
 
@@ -373,7 +374,7 @@ registerSlash({
           return client.createSpeech({ text: prompt, voice_id: voiceId, model }, { idempotencyKey: randomUUID() });
         case 'music':
           return client.createMusic(
-            { prompt, model, duration_seconds: duration ? Number(duration) : undefined },
+            { prompt, model, duration_seconds: duration ? Number(duration) : undefined, image_url: imageUrl, negative_prompt: negativePrompt },
             { idempotencyKey: randomUUID() }
           );
         case 'sfx':
