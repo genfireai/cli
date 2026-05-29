@@ -105,7 +105,7 @@ This reads the key from your keychain and writes the correct MCP config. Restart
 
 ```bash
 genfire generate image   <prompt> [-m model] [-a 16:9] [-n 4] [-i ref.png] [--quality high] [--resolution 2K] [-o out.png]
-genfire generate video   <prompt> [-m model] [-d 8] [-i first-frame.png] [-o out.mp4]
+genfire generate video   <prompt> [-m model] [-d 8] [-r 1080p] [-i first-frame.png] [-o out.mp4]
 genfire generate speech  <text>   --voice-id <id> [--format mp3_44100_128] [-o speech.mp3]
 genfire generate music   <prompt> [-d 30] [--instrumental] [-o track.mp3]
 genfire generate sfx     <prompt> [-d 5] [--loop] [-o sfx.mp3]
