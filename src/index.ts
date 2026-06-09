@@ -13,6 +13,7 @@ import { registerBatchCommands } from './commands/batch.js';
 import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
+import { registerFacelessReelsCommand } from './commands/faceless-reels.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
 import { registerVoicesCommand } from './commands/voices.js';
 import { registerMcpCommand } from './commands/mcp.js';
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   registerRunsCommand(program);
   registerCostCommand(program);
   registerWorkflowCommands(program);
+  registerFacelessReelsCommand(program);
   registerInfluencersCommand(program);
   registerVoicesCommand(program);
   registerMcpCommand(program);

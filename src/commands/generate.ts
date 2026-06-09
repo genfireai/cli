@@ -374,6 +374,58 @@ export function registerGenerateCommands(program: Command): void {
       await maybeFinish(client, run.id, 'lipsync', opts);
     });
 
+  // ---- faceless reel ----
+  // Reels are a multi-minute pipeline, so default the wait window higher than
+  // the shared 15m (commonOptions sets it; we override the default below).
+  {
+    const reel = commonOptions(
+      generate
+        .command('faceless-reel <topic>')
+        .description('Generate a vertical (9:16) faceless reel: script → voiceover → style-locked images → music → captioned video')
+    )
+      .option('-p, --preset <id>', 'Niche preset id (see: genfire faceless-reels presets)')
+      .option('-s, --style <id>', 'Visual style id (see: genfire faceless-reels styles)')
+      .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
+      .option('-c, --caption-preset <id>', 'Caption preset id (see: genfire faceless-reels caption-presets)')
+      .option('--caption-animation <name>', 'highlight | pop | typewriter | classic | background')
+      .option('--voice-id <id>', 'TTS voice id')
+      .option('--direction <text>', 'Extra creative direction for the script')
+      .option('--music-source <source>', 'none | preset | ai | library', 'none')
+      .option('--music-preset <id>', 'Music preset id (with --music-source preset)')
+      .option('--music-prompt <text>', 'Prompt for an AI-generated track (with --music-source ai)');
+    // Reels render in minutes — bump the default wait window.
+    const wt = reel.options.find((o) => o.long === '--wait-timeout');
+    if (wt) wt.defaultValue = '20m';
+    reel.action(async (topic: string, opts: CommonGenerateOptions & {
+      preset?: string; style?: string; duration?: string; captionPreset?: string; captionAnimation?: string;
+      voiceId?: string; direction?: string; musicSource?: string; musicPreset?: string; musicPrompt?: string;
+    }) => {
+      const client = await createClient();
+      const music = opts.musicSource && opts.musicSource !== 'none'
+        ? {
+            source: opts.musicSource as 'none' | 'preset' | 'ai' | 'library',
+            preset_id: opts.musicPreset,
+            prompt: opts.musicPrompt
+          }
+        : undefined;
+      const run = await client.createFacelessReel(
+        {
+          topic,
+          preset_id: opts.preset,
+          style_id: opts.style,
+          target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
+          caption_preset_id: opts.captionPreset,
+          caption_animation: opts.captionAnimation,
+          voice_id: opts.voiceId,
+          direction: opts.direction,
+          music
+        },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, 'faceless-reel', opts);
+    });
+  }
+
   // ---- upload (raw, no generation) ----
   generate
     .command('upload <path>')
