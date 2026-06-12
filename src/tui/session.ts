@@ -32,6 +32,8 @@ const CLI_DEFAULT_SCOPES = [
   'products:write',
   'workflows:read',
   'workflows:write',
+  'reels:read',
+  'reels:write',
   'batches:read',
   'batches:write',
   'uploads:write',
