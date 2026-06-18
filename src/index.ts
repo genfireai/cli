@@ -15,6 +15,7 @@ import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerFacelessReelsCommand } from './commands/faceless-reels.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
+import { registerGamesCommand } from './commands/games.js';
 import { registerVoicesCommand } from './commands/voices.js';
 import { registerMcpCommand } from './commands/mcp.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
   registerWorkflowCommands(program);
   registerFacelessReelsCommand(program);
   registerInfluencersCommand(program);
+  registerGamesCommand(program);
   registerVoicesCommand(program);
   registerMcpCommand(program);
 

@@ -37,7 +37,8 @@ const CLI_DEFAULT_SCOPES = [
   'batches:read',
   'batches:write',
   'uploads:write',
-  'influencers:read'
+  'influencers:read',
+  'influencers:write'
 ] as const;
 
 export interface LoginOptions {

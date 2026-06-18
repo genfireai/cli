@@ -40,7 +40,8 @@ const CLI_DEFAULT_SCOPES = [
   'batches:read',
   'batches:write',
   'uploads:write',
-  'influencers:read'
+  'influencers:read',
+  'influencers:write'
 ] as const;
 
 async function tryOpenBrowser(url: string): Promise<boolean> {

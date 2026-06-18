@@ -2,10 +2,45 @@ import { Command } from 'commander';
 import { GenFireApiError } from '@genfire/sdk';
 import { createClient } from '../client.js';
 import { CliError } from '../errors.js';
+import { resolveMediaInput } from '../runHelpers.js';
 import { bold, cyan, dim, green, printResult, printTable, yellow } from '../output.js';
 
 export function registerInfluencersCommand(program: Command): void {
-  const influencers = program.command('influencers').description('Inspect your trained influencer characters');
+  const influencers = program.command('influencers').description('Create and inspect your influencer characters');
+
+  influencers
+    .command('create <handle>')
+    .description('Create a reusable influencer from 1–8 reference photos (URLs or local paths)')
+    .requiredOption('-p, --photo <urlOrPath...>', 'Reference photo URL or local path (auto-uploaded). Repeat or pass multiple; 1–8 total.')
+    .option('-n, --name <name>', 'Display name (defaults to the handle)')
+    .action(async (handle: string, opts: { photo: string[]; name?: string }) => {
+      const photos = opts.photo || [];
+      if (photos.length < 1 || photos.length > 8) {
+        throw new CliError('Provide between 1 and 8 photos with -p/--photo.', 'invalid_photo_count');
+      }
+      const client = await createClient();
+      // Auto-upload any local paths; pass through https URLs unchanged.
+      const photoUrls: string[] = [];
+      for (const photo of photos) {
+        const resolved = await resolveMediaInput(client, photo);
+        photoUrls.push(resolved.url);
+      }
+      process.stdout.write(`${dim('Generating reference sheet to lock identity (this is billable, ~30–60s)…')}\n`);
+      const influencer = await client.createInfluencer({
+        handle,
+        displayName: opts.name,
+        photoUrls
+      });
+      printResult(influencer, () => {
+        process.stdout.write(`${green('✓')} Created ${bold('@' + influencer.handle)}  ${influencer.display_name}\n`);
+        process.stdout.write(`${dim('ID:')}     ${influencer.id}\n`);
+        process.stdout.write(`${dim('Status:')} ${influencer.status === 'ready' ? green(influencer.status) : yellow(influencer.status)}\n`);
+        if (influencer.preview_url) {
+          process.stdout.write(`${dim('Preview:')} ${cyan(influencer.preview_url)}\n`);
+        }
+        process.stdout.write(`\n${dim(`Use in prompts: genfire generate image "@${influencer.handle} at a coffee shop"`)}\n`);
+      });
+    });
 
   influencers
     .command('list')
