@@ -174,11 +174,12 @@ export function registerGenerateCommands(program: Command): void {
     .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1)')
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent)')
-    .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p). Higher resolutions cost more credits.')
+    .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
     .option('--no-audio', 'Disable audio generation if the model supports it')
+    .option('--bitrate-mode <mode>', 'Encoding bitrate for Seedance 2.0: standard or high (high = larger, higher-quality file at no extra cost)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; audio: boolean;
+      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; audio: boolean; bitrateMode?: string;
     }) => {
       const client = await createClient();
       const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
@@ -190,7 +191,8 @@ export function registerGenerateCommands(program: Command): void {
           duration: opts.duration ? Number(opts.duration) : undefined,
           resolution: opts.resolution,
           image_url: imageUrl,
-          generate_audio: opts.audio === false ? false : undefined
+          generate_audio: opts.audio === false ? false : undefined,
+          bitrate_mode: opts.bitrateMode as ('standard' | 'high' | undefined)
         },
         { idempotencyKey: randomUUID() }
       );
