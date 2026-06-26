@@ -391,6 +391,7 @@ export function registerGenerateCommands(program: Command): void {
       .option('-c, --caption-preset <id>', 'Caption preset id (see: genfire faceless-reels caption-presets)')
       .option('--caption-animation <name>', 'highlight | pop | typewriter | classic | background')
       .option('--voice-id <id>', 'TTS voice id')
+      .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic', 'auto')
       .option('--direction <text>', 'Extra creative direction for the script')
       .option('--music-source <source>', 'none | preset | ai | library', 'none')
       .option('--music-preset <id>', 'Music preset id (with --music-source preset)')
@@ -400,7 +401,7 @@ export function registerGenerateCommands(program: Command): void {
     if (wt) wt.defaultValue = '20m';
     reel.action(async (topic: string, opts: CommonGenerateOptions & {
       preset?: string; style?: string; duration?: string; captionPreset?: string; captionAnimation?: string;
-      voiceId?: string; direction?: string; musicSource?: string; musicPreset?: string; musicPrompt?: string;
+      voiceId?: string; vibe?: string; direction?: string; musicSource?: string; musicPreset?: string; musicPrompt?: string;
     }) => {
       const client = await createClient();
       const music = opts.musicSource && opts.musicSource !== 'none'
@@ -419,6 +420,7 @@ export function registerGenerateCommands(program: Command): void {
           caption_preset_id: opts.captionPreset,
           caption_animation: opts.captionAnimation,
           voice_id: opts.voiceId,
+          motion_vibe: opts.vibe as ('auto' | 'calm' | 'dynamic' | 'energetic') | undefined,
           direction: opts.direction,
           music
         },
