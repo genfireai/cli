@@ -392,6 +392,8 @@ export function registerGenerateCommands(program: Command): void {
       .option('--caption-animation <name>', 'highlight | pop | typewriter | classic | background')
       .option('--voice-id <id>', 'TTS voice id')
       .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic', 'auto')
+      .option('--animated-hook', 'Premium: animate the first scene with a real video clip')
+      .option('--video-model <m>', 'i2v model for the animated hook: grok | seedance-mini', 'grok')
       .option('--direction <text>', 'Extra creative direction for the script')
       .option('--music-source <source>', 'none | preset | ai | library', 'none')
       .option('--music-preset <id>', 'Music preset id (with --music-source preset)')
@@ -401,7 +403,7 @@ export function registerGenerateCommands(program: Command): void {
     if (wt) wt.defaultValue = '20m';
     reel.action(async (topic: string, opts: CommonGenerateOptions & {
       preset?: string; style?: string; duration?: string; captionPreset?: string; captionAnimation?: string;
-      voiceId?: string; vibe?: string; direction?: string; musicSource?: string; musicPreset?: string; musicPrompt?: string;
+      voiceId?: string; vibe?: string; animatedHook?: boolean; videoModel?: string; direction?: string; musicSource?: string; musicPreset?: string; musicPrompt?: string;
     }) => {
       const client = await createClient();
       const music = opts.musicSource && opts.musicSource !== 'none'
@@ -421,6 +423,8 @@ export function registerGenerateCommands(program: Command): void {
           caption_animation: opts.captionAnimation,
           voice_id: opts.voiceId,
           motion_vibe: opts.vibe as ('auto' | 'calm' | 'dynamic' | 'energetic') | undefined,
+          animated_hook: opts.animatedHook,
+          video_model: opts.videoModel as ('grok' | 'seedance-mini') | undefined,
           direction: opts.direction,
           music
         },

@@ -131,6 +131,8 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('-c, --caption-preset <id>', 'Caption preset id')
     .option('--voice-id <id>', 'TTS voice id')
     .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic')
+    .option('--animated-hook', 'Premium: animate the first scene with a real video clip')
+    .option('--video-model <m>', 'i2v model for the animated hook: grok | seedance-mini')
     .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
     .option('--topic-source <source>', 'ai-auto | user-list', 'ai-auto')
     .option('--topic-seeds <list>', 'Comma-separated topics (with --topic-source user-list)')
@@ -140,7 +142,7 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--disabled', 'Create the schedule paused')
     .action(async (opts: {
       label?: string; preset?: string; style?: string; captionPreset?: string; voiceId?: string;
-      vibe?: string; duration?: string; topicSource?: string; topicSeeds?: string; cadencePerDay?: string;
+      vibe?: string; animatedHook?: boolean; videoModel?: string; duration?: string; topicSource?: string; topicSeeds?: string; cadencePerDay?: string;
       slots?: string; timezone?: string; disabled?: boolean;
     }) => {
       const client = await createClient();
@@ -151,6 +153,8 @@ export function registerFacelessReelsCommand(program: Command): void {
         caption_preset_id: opts.captionPreset,
         voice_id: opts.voiceId,
         motion_vibe: opts.vibe as ('auto' | 'calm' | 'dynamic' | 'energetic') | undefined,
+        animated_hook: opts.animatedHook,
+        video_model: opts.videoModel as ('grok' | 'seedance-mini') | undefined,
         target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
         topic_source: opts.topicSource as 'ai-auto' | 'user-list' | undefined,
         topic_seeds: opts.topicSeeds ? opts.topicSeeds.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
@@ -173,6 +177,8 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('-c, --caption-preset <id>', 'Caption preset id')
     .option('--voice-id <id>', 'TTS voice id')
     .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic')
+    .option('--animated-hook', 'Premium: animate the first scene with a real video clip')
+    .option('--video-model <m>', 'i2v model for the animated hook: grok | seedance-mini')
     .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
     .option('--cadence-per-day <n>', 'Reels per day (1–6)')
     .option('--slots <list>', 'Comma-separated local "HH:mm" times')
@@ -181,7 +187,7 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--disable', 'Pause the schedule')
     .action(async (id: string, opts: {
       label?: string; preset?: string; style?: string; captionPreset?: string; voiceId?: string;
-      vibe?: string; duration?: string; cadencePerDay?: string; slots?: string; timezone?: string;
+      vibe?: string; animatedHook?: boolean; videoModel?: string; duration?: string; cadencePerDay?: string; slots?: string; timezone?: string;
       enable?: boolean; disable?: boolean;
     }) => {
       const client = await createClient();
@@ -192,6 +198,8 @@ export function registerFacelessReelsCommand(program: Command): void {
         caption_preset_id: opts.captionPreset,
         voice_id: opts.voiceId,
         motion_vibe: opts.vibe as ('auto' | 'calm' | 'dynamic' | 'energetic') | undefined,
+        animated_hook: opts.animatedHook,
+        video_model: opts.videoModel as ('grok' | 'seedance-mini') | undefined,
         target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
         cadence_per_day: opts.cadencePerDay ? Number(opts.cadencePerDay) : undefined,
         slots: opts.slots ? opts.slots.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
