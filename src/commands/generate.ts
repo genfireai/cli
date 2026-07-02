@@ -205,12 +205,19 @@ export function registerGenerateCommands(program: Command): void {
       .command('speech <text>')
       .description('Synthesize speech from text')
   )
-    .requiredOption('--voice-id <id>', 'Voice id to use')
+    .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
     .option('-m, --model <model>', 'Speech model alias')
     .option('--voice-name <name>', 'Optional friendly voice name for logs')
-    .option('--format <format>', 'Output format, e.g. mp3_44100_128')
+    .option('--format <format>', 'Output format, e.g. mp3_44100_128 (Seed Audio: wav|mp3|pcm|ogg_opus)')
+    .option('--audio-url <url...>', 'Reference audio URL(s), up to 3 — reference in the text as @Audio1–@Audio3 (Seed Audio 1.0 only)')
+    .option('--image-url <url>', 'Reference image URL, not combinable with --audio-url (Seed Audio 1.0 only)')
+    .option('--sample-rate <hz>', 'Output sample rate in Hz: 8000|16000|24000|32000|44100|48000 (Seed Audio 1.0 only)')
+    .option('--speed <speed>', 'Speech speed 0.5–2 (Seed Audio 1.0 only)')
+    .option('--volume <volume>', 'Volume 0.5–2 (Seed Audio 1.0 only)')
+    .option('--pitch <semitones>', 'Pitch shift in semitones -12..12 (Seed Audio 1.0 only)')
     .action(async (text: string, opts: CommonGenerateOptions & {
-      model?: string; voiceId: string; voiceName?: string; format?: string;
+      model?: string; voiceId?: string; voiceName?: string; format?: string;
+      audioUrl?: string[]; imageUrl?: string; sampleRate?: string; speed?: string; volume?: string; pitch?: string;
     }) => {
       const client = await createClient();
       const run = await client.createSpeech(
@@ -219,7 +226,13 @@ export function registerGenerateCommands(program: Command): void {
           voice_id: opts.voiceId,
           voice_name: opts.voiceName,
           model: opts.model,
-          output_format: opts.format
+          output_format: opts.format,
+          audio_urls: opts.audioUrl && opts.audioUrl.length > 0 ? opts.audioUrl.slice(0, 3) : undefined,
+          image_url: opts.imageUrl,
+          sample_rate: opts.sampleRate ? Number(opts.sampleRate) : undefined,
+          speed: opts.speed ? Number(opts.speed) : undefined,
+          volume: opts.volume ? Number(opts.volume) : undefined,
+          pitch: opts.pitch ? Number(opts.pitch) : undefined
         },
         { idempotencyKey: randomUUID() }
       );
