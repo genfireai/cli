@@ -45,7 +45,7 @@ After installing the CLI, install the GenFire Skills bundle inside Claude Code:
 /plugin install genfire@genfire
 ```
 
-Then ask Claude in plain English — *"generate a hero image of a neon-lit alley"*, *"run the storyboard workflow with these inputs"*, *"what's my credit balance?"* — and Claude runs the right `genfire` command for you. See [genfireai/skills](https://github.com/genfireai/skills) for what's bundled.
+Then ask Claude in plain English — *"generate a hero image of a neon-lit alley"*, *"run the hook_pack workflow with these inputs"*, *"what's my credit balance?"* — and Claude runs the right `genfire` command for you. See [genfireai/skills](https://github.com/genfireai/skills) for what's bundled.
 
 ## Interactive shell
 
@@ -60,7 +60,7 @@ Inside the shell:
 ```
 › /login
 › /generate image "a neon-lit alley at dusk" -o alley.png
-› /workflow run storyboard --inputs '{"prompt":"sci-fi rooftop chase"}'
+› /workflow run hook_pack --inputs '{"prompt":"sci-fi rooftop chase"}'
 › /runs list
 › /quit
 ```
@@ -167,8 +167,8 @@ GenFire's workflow system lets you chain multiple generations into one pipeline.
 
 ```bash
 genfire workflow list
-genfire workflow get  storyboard
-genfire workflow run  storyboard --inputs vars.json -o results/
+genfire workflow get  hook_pack
+genfire workflow run  hook_pack --inputs vars.json -o results/
 ```
 
 `--inputs` accepts either a path to a JSON file or a literal JSON string.
