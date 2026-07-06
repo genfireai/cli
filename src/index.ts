@@ -14,6 +14,7 @@ import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerFacelessReelsCommand } from './commands/faceless-reels.js';
+import { registerExplainersCommand } from './commands/explainers.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
 import { registerElementsCommand } from './commands/elements.js';
 import { registerGamesCommand } from './commands/games.js';
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   registerCostCommand(program);
   registerWorkflowCommands(program);
   registerFacelessReelsCommand(program);
+  registerExplainersCommand(program);
   registerInfluencersCommand(program);
   registerElementsCommand(program);
   registerGamesCommand(program);

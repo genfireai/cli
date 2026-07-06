@@ -12,6 +12,7 @@ import {
   waitForRun
 } from '../runHelpers.js';
 import { resolveMentionFromPrompt } from './influencers.js';
+import { readExplainerScriptFile } from './explainers.js';
 
 interface CommonGenerateOptions {
   output?: string;
@@ -88,7 +89,7 @@ async function maybeFinish(
 }
 
 export function registerGenerateCommands(program: Command): void {
-  const generate = program.command('generate').description('Generate media (image, video, lipsync, speech, music, sfx)');
+  const generate = program.command('generate').description('Generate media (image, video, lipsync, speech, music, sfx, faceless-reel, explainer)');
 
   // ---- image ----
   commonOptions(
@@ -444,6 +445,104 @@ export function registerGenerateCommands(program: Command): void {
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'faceless-reel', opts);
+    });
+  }
+
+  // ---- explainer ----
+  // Explainer films run 20s–10min with per-scene video clips, so renders can
+  // take up to ~30 minutes — default the wait window to 45m (same pattern as
+  // the faceless-reel override above).
+  {
+    const explainer = commonOptions(
+      generate
+        .command('explainer <topic>')
+        .description('Generate an explainer film (20s–10min, 16:9 or 9:16): script → voiceover → style-locked frames → per-scene video clips → composed film')
+    )
+      .option('-s, --style <id>', 'Visual style id (see: genfire explainers styles)')
+      .option('-a, --aspect-ratio <ar>', 'Aspect ratio: 16:9 (default) or 9:16')
+      .option('-d, --duration <seconds>', 'Target length in seconds (20–600); ignored with --script-file')
+      .option('--voice-id <id>', 'TTS voice id')
+      .option('--motion-level <level>', 'How many scenes get real video clips: full | mixed | stills')
+      .option('--music-source <source>', 'none | preset | ai | library', 'none')
+      .option('--music-preset <id>', 'Music preset id (with --music-source preset)')
+      .option('--music-prompt <text>', 'Prompt for an AI-generated track (with --music-source ai)')
+      .option('--caption-preset <id>', 'Caption preset id — captions are opt-in for explainers (see: genfire faceless-reels caption-presets)')
+      .option('--caption-position <pos>', 'Caption placement: top | middle | bottom')
+      .option('--caption-mode <mode>', 'full (every word) | keywords (emphasis pops only)')
+      .option(
+        '--ref <url[|label]>',
+        'Reference image URL with an optional |label, e.g. --ref "https://…/logo.png|brand logo" (repeat for up to 8; beats cite them 1-based via refs)',
+        (value: string, previous: string[]) => previous.concat([value]),
+        [] as string[]
+      )
+      .option('--script-file <path>', 'JSON file with a structured script ({ cast?, beats: [...] }) — authors every beat yourself; GenFire makes zero LLM calls')
+      .option('--custom-script-file <path>', 'Plain-text file narrated verbatim (GenFire still storyboards the visuals)');
+    // Explainers render in tens of minutes — bump the default wait window.
+    const ewt = explainer.options.find((o) => o.long === '--wait-timeout');
+    if (ewt) ewt.defaultValue = '45m';
+    explainer.action(async (topic: string, opts: CommonGenerateOptions & {
+      style?: string; aspectRatio?: string; duration?: string; voiceId?: string; motionLevel?: string;
+      musicSource?: string; musicPreset?: string; musicPrompt?: string;
+      captionPreset?: string; captionPosition?: string; captionMode?: string;
+      ref?: string[]; scriptFile?: string; customScriptFile?: string;
+    }) => {
+      const client = await createClient();
+
+      const script = opts.scriptFile ? await readExplainerScriptFile(opts.scriptFile) : undefined;
+
+      let customScript: string | undefined;
+      if (opts.customScriptFile) {
+        const { readFile } = await import('node:fs/promises');
+        try {
+          customScript = await readFile(opts.customScriptFile, 'utf8');
+        } catch (err) {
+          throw new CliError(
+            `Could not read --custom-script-file ${opts.customScriptFile}: ${(err as Error).message}`,
+            'invalid_custom_script_file'
+          );
+        }
+      }
+
+      const refs = opts.ref ?? [];
+      if (refs.length > 8) {
+        throw new CliError('At most 8 --ref reference images are allowed', 'too_many_refs');
+      }
+      const referenceImages = refs.length > 0
+        ? refs.map((entry) => {
+            const pipe = entry.indexOf('|');
+            if (pipe === -1) return { url: entry.trim() };
+            const label = entry.slice(pipe + 1).trim();
+            return { url: entry.slice(0, pipe).trim(), ...(label ? { label } : {}) };
+          })
+        : undefined;
+
+      const music = opts.musicSource && opts.musicSource !== 'none'
+        ? {
+            source: opts.musicSource as 'none' | 'preset' | 'ai' | 'library',
+            preset_id: opts.musicPreset,
+            prompt: opts.musicPrompt
+          }
+        : undefined;
+
+      const run = await client.createExplainer(
+        {
+          topic,
+          script,
+          custom_script: customScript,
+          style_id: opts.style,
+          aspect_ratio: opts.aspectRatio as ('16:9' | '9:16') | undefined,
+          target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
+          voice_id: opts.voiceId,
+          motion_level: opts.motionLevel as ('full' | 'mixed' | 'stills') | undefined,
+          music,
+          caption_preset_id: opts.captionPreset,
+          caption_position: opts.captionPosition as ('top' | 'middle' | 'bottom') | undefined,
+          caption_mode: opts.captionMode as ('full' | 'keywords') | undefined,
+          reference_images: referenceImages
+        },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, 'explainer', opts);
     });
   }
 
