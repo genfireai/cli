@@ -70,7 +70,7 @@ export function registerFacelessReelsCommand(program: Command): void {
     .command('estimate-cost')
     .description('Estimate the credit cost of a reel before generating it')
     .option('-p, --preset <id>', 'Niche preset id')
-    .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
+    .option('-d, --duration <seconds>', 'Target length in seconds (10–600, up to 10 minutes)')
     .option('--music-source <source>', 'none | preset | ai | library', 'none')
     .action(async (opts: { preset?: string; duration?: string; musicSource?: string }) => {
       const client = await createClient();
@@ -133,7 +133,7 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic')
     .option('--animated-hook', 'Premium: animate the first scene with a real video clip')
     .option('--video-model <m>', 'i2v model for the animated hook: grok | seedance-mini')
-    .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
+    .option('-d, --duration <seconds>', 'Target length in seconds (10–600, up to 10 minutes)')
     .option('--topic-source <source>', 'ai-auto | user-list', 'ai-auto')
     .option('--topic-seeds <list>', 'Comma-separated topics (with --topic-source user-list)')
     .option('--cadence-per-day <n>', 'Reels per day (1–6)')
@@ -179,7 +179,7 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--vibe <mode>', 'Camera-motion feel: auto | calm | dynamic | energetic')
     .option('--animated-hook', 'Premium: animate the first scene with a real video clip')
     .option('--video-model <m>', 'i2v model for the animated hook: grok | seedance-mini')
-    .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
+    .option('-d, --duration <seconds>', 'Target length in seconds (10–600, up to 10 minutes)')
     .option('--cadence-per-day <n>', 'Reels per day (1–6)')
     .option('--slots <list>', 'Comma-separated local "HH:mm" times')
     .option('--timezone <tz>', 'IANA timezone')

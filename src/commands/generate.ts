@@ -401,7 +401,7 @@ export function registerGenerateCommands(program: Command): void {
     )
       .option('-p, --preset <id>', 'Niche preset id (see: genfire faceless-reels presets)')
       .option('-s, --style <id>', 'Visual style id (see: genfire faceless-reels styles)')
-      .option('-d, --duration <seconds>', 'Target length in seconds (10–120)')
+      .option('-d, --duration <seconds>', 'Target length in seconds (10–600, up to 10 minutes)')
       .option('-c, --caption-preset <id>', 'Caption preset id (see: genfire faceless-reels caption-presets)')
       .option('--caption-animation <name>', 'highlight | pop | typewriter | classic | background')
       .option('--voice-id <id>', 'TTS voice id')
