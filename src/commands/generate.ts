@@ -22,6 +22,35 @@ interface CommonGenerateOptions {
   waitInterval: string;
 }
 
+/**
+ * Read + parse an ElevenLabs music composition plan from a JSON file (the
+ * `--plan-file` flag on `generate music`). The file must contain the plan
+ * object itself: { sections: [...] } (music_v1) or { chunks: [...] } (music_v2).
+ */
+async function readMusicPlanFile(path: string): Promise<Record<string, unknown>> {
+  const { readFile } = await import('node:fs/promises');
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (err) {
+    throw new CliError(`Could not read --plan-file ${path}: ${(err as Error).message}`, 'invalid_plan_file');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new CliError(`--plan-file ${path} is not valid JSON: ${(err as Error).message}`, 'invalid_plan_file');
+  }
+  const plan = parsed as Record<string, unknown> | null;
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan) || (!Array.isArray(plan.sections) && !Array.isArray(plan.chunks))) {
+    throw new CliError(
+      `--plan-file ${path} must contain a composition plan object with a sections (music_v1) or chunks (music_v2) array`,
+      'invalid_plan_file'
+    );
+  }
+  return plan;
+}
+
 function parseDurationSeconds(value: string, flag: string): number {
   const trimmed = value.trim();
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(ms|s|m)?$/i);
@@ -293,25 +322,38 @@ export function registerGenerateCommands(program: Command): void {
   // ---- music ----
   commonOptions(
     generate
-      .command('music <prompt>')
-      .description('Generate music from a prompt')
+      .command('music [prompt]')
+      .description('Generate music from a prompt, or from a composition plan via --plan-file')
   )
-    .option('-m, --model <model>', 'Music model alias')
-    .option('-d, --duration <seconds>', 'Duration in seconds (ElevenLabs models only)')
+    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.lyria3_pro)')
+    .option('-d, --duration <seconds>', 'Duration in seconds, 3-600 (ElevenLabs prompt mode only)')
+    .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
+    .option('--seed <n>', 'Random seed for more consistent results (with --plan-file only)')
+    .option('--flex-sections', 'Let music_v1 flex section durations of a --plan-file for quality (durations are strict by default)')
     .option('--format <format>', 'Output format')
-    .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs models only)')
+    .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs prompt mode only)')
     .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3 Pro only)')
     .option('--negative-prompt <text>', 'What to exclude from the audio (Lyria 3 Pro only)')
-    .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; duration?: string; format?: string; instrumental?: boolean;
-      imageUrl?: string; negativePrompt?: string;
+    .action(async (prompt: string | undefined, opts: CommonGenerateOptions & {
+      model?: string; duration?: string; planFile?: string; seed?: string; flexSections?: boolean;
+      format?: string; instrumental?: boolean; imageUrl?: string; negativePrompt?: string;
     }) => {
+      const compositionPlan = opts.planFile ? await readMusicPlanFile(opts.planFile) : undefined;
+      if (!prompt && !compositionPlan) {
+        throw new CliError('Provide a prompt or --plan-file.', 'missing_prompt');
+      }
+      if (prompt && compositionPlan) {
+        throw new CliError('A prompt and --plan-file cannot be used together.', 'invalid_arguments');
+      }
       const client = await createClient();
       const run = await client.createMusic(
         {
           prompt,
+          composition_plan: compositionPlan,
           model: opts.model,
           duration_seconds: opts.duration ? Number(opts.duration) : undefined,
+          seed: opts.seed ? Number(opts.seed) : undefined,
+          respect_sections_durations: opts.flexSections ? false : undefined,
           output_format: opts.format,
           force_instrumental: opts.instrumental,
           image_url: opts.imageUrl,
