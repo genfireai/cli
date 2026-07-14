@@ -5,20 +5,78 @@ import { CliError } from '../errors.js';
 import { resolveMediaInput } from '../runHelpers.js';
 import { bold, cyan, dim, green, printResult, printTable, yellow } from '../output.js';
 
+// Shared success output for both create modes (photos / from-scratch). Note
+// creation is async: status is usually `creating` — poll `influencers get`.
+function printCreated(influencer: {
+  id: string;
+  handle: string;
+  display_name: string;
+  status: string;
+  preview_url?: string | null;
+}): void {
+  printResult(influencer, () => {
+    process.stdout.write(`${green('✓')} Created ${bold('@' + influencer.handle)}  ${influencer.display_name}\n`);
+    process.stdout.write(`${dim('ID:')}     ${influencer.id}\n`);
+    process.stdout.write(`${dim('Status:')} ${influencer.status === 'ready' ? green(influencer.status) : yellow(influencer.status)}\n`);
+    if (influencer.preview_url) {
+      process.stdout.write(`${dim('Preview:')} ${cyan(influencer.preview_url)}\n`);
+    }
+    if (influencer.status !== 'ready') {
+      process.stdout.write(`${dim(`Generating… poll with: genfire influencers get ${influencer.id}`)}\n`);
+    }
+    process.stdout.write(`\n${dim(`Use in prompts: genfire generate image "@${influencer.handle} at a coffee shop"`)}\n`);
+  });
+}
+
 export function registerInfluencersCommand(program: Command): void {
   const influencers = program.command('influencers').description('Create and inspect your influencer characters');
 
   influencers
     .command('create <handle>')
-    .description('Create a reusable influencer from 1–8 reference photos (URLs or local paths)')
-    .requiredOption('-p, --photo <urlOrPath...>', 'Reference photo URL or local path (auto-uploaded). Repeat or pass multiple; 1–8 total.')
-    .option('-n, --name <name>', 'Display name (defaults to the handle)')
-    .action(async (handle: string, opts: { photo: string[]; name?: string }) => {
+    .description('Create a reusable influencer — from reference photos, or from scratch with --gender/--heritage/--age')
+    .option('-p, --photo <urlOrPath...>', 'FROM PHOTOS: reference photo URL or local path (auto-uploaded). Repeat or pass multiple; 1–8 total. Mutually exclusive with the appearance flags.')
+    .option('--gender <gender>', 'FROM SCRATCH: gender, e.g. "woman", "man".')
+    .option('--heritage <heritage>', 'FROM SCRATCH: race/ethnicity, e.g. "korean".')
+    .option('--age <range>', 'FROM SCRATCH: age range — one of 18-21, 21-25, 25-30, 30-40, 40+.')
+    .option('--appearance <text>', 'FROM SCRATCH: optional free-text appearance descriptor, e.g. "freckles, platinum bob, green eyes".')
+    .action(async (handle: string, opts: { photo?: string[]; gender?: string; heritage?: string; age?: string; appearance?: string }) => {
       const photos = opts.photo || [];
-      if (photos.length < 1 || photos.length > 8) {
+      const wantsScratch = Boolean(opts.gender || opts.heritage || opts.age || opts.appearance);
+
+      if (photos.length > 0 && wantsScratch) {
+        throw new CliError('Provide either photos (-p) or the appearance flags (--gender/--heritage/--age), not both.', 'ambiguous_mode');
+      }
+      if (photos.length === 0 && !wantsScratch) {
+        throw new CliError('Provide 1–8 photos with -p/--photo, or create from scratch with --gender, --heritage and --age.', 'missing_input');
+      }
+
+      const client = await createClient();
+
+      if (wantsScratch) {
+        const validAges = ['18-21', '21-25', '25-30', '30-40', '40+'];
+        if (!opts.gender || !opts.heritage || !opts.age) {
+          throw new CliError('From-scratch creation needs --gender, --heritage and --age.', 'missing_appearance');
+        }
+        if (!validAges.includes(opts.age)) {
+          throw new CliError(`--age must be one of: ${validAges.join(', ')}.`, 'invalid_age');
+        }
+        process.stdout.write(`${dim('Generating your influencer from scratch (hero photo + reference sheet, billable, ~60–120s)…')}\n`);
+        const influencer = await client.createInfluencer({
+          handle,
+          appearance: {
+            gender: opts.gender,
+            heritage: opts.heritage,
+            age: opts.age as '18-21' | '21-25' | '25-30' | '30-40' | '40+',
+            prompt: opts.appearance
+          }
+        });
+        printCreated(influencer);
+        return;
+      }
+
+      if (photos.length > 8) {
         throw new CliError('Provide between 1 and 8 photos with -p/--photo.', 'invalid_photo_count');
       }
-      const client = await createClient();
       // Auto-upload any local paths; pass through https URLs unchanged.
       const photoUrls: string[] = [];
       for (const photo of photos) {
@@ -26,20 +84,8 @@ export function registerInfluencersCommand(program: Command): void {
         photoUrls.push(resolved.url);
       }
       process.stdout.write(`${dim('Generating reference sheet to lock identity (this is billable, ~30–60s)…')}\n`);
-      const influencer = await client.createInfluencer({
-        handle,
-        displayName: opts.name,
-        photoUrls
-      });
-      printResult(influencer, () => {
-        process.stdout.write(`${green('✓')} Created ${bold('@' + influencer.handle)}  ${influencer.display_name}\n`);
-        process.stdout.write(`${dim('ID:')}     ${influencer.id}\n`);
-        process.stdout.write(`${dim('Status:')} ${influencer.status === 'ready' ? green(influencer.status) : yellow(influencer.status)}\n`);
-        if (influencer.preview_url) {
-          process.stdout.write(`${dim('Preview:')} ${cyan(influencer.preview_url)}\n`);
-        }
-        process.stdout.write(`\n${dim(`Use in prompts: genfire generate image "@${influencer.handle} at a coffee shop"`)}\n`);
-      });
+      const influencer = await client.createInfluencer({ handle, photoUrls });
+      printCreated(influencer);
     });
 
   influencers
