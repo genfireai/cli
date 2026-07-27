@@ -17,6 +17,7 @@ import { registerFacelessReelsCommand } from './commands/faceless-reels.js';
 import { registerExplainersCommand } from './commands/explainers.js';
 import { registerInfluencersCommand } from './commands/influencers.js';
 import { registerElementsCommand } from './commands/elements.js';
+import { registerBrandsCommand } from './commands/brands.js';
 import { registerGamesCommand } from './commands/games.js';
 import { registerVoicesCommand } from './commands/voices.js';
 import { registerMcpCommand } from './commands/mcp.js';
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
   registerExplainersCommand(program);
   registerInfluencersCommand(program);
   registerElementsCommand(program);
+  registerBrandsCommand(program);
   registerGamesCommand(program);
   registerVoicesCommand(program);
   registerMcpCommand(program);

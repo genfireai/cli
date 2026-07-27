@@ -42,7 +42,9 @@ const CLI_DEFAULT_SCOPES = [
   'influencers:read',
   'influencers:write',
   'elements:read',
-  'elements:write'
+  'elements:write',
+  'brands:read',
+  'brands:write'
 ] as const;
 
 export interface LoginOptions {
