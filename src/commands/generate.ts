@@ -206,13 +206,37 @@ export function registerGenerateCommands(program: Command): void {
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent)')
     .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
+    .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths, up to 9 — cite in the prompt as Image 1, Image 2, … (reference-to-video)')
+    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths, up to 3, 2-15s each — cite as Video 1..Video 3 (Hailuo 03 only)')
+    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, up to 3, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice ("the woman in Image 1 speaks with the voice in Audio 1"). Needs at least one --ref-image or --ref-video alongside it (Hailuo 03 only)')
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate-mode <mode>', 'Encoding bitrate for Seedance 2.0: standard or high (high = larger, higher-quality file at no extra cost)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; audio: boolean; bitrateMode?: string;
+      refImage?: string[]; refVideo?: string[]; refAudio?: string[];
     }) => {
       const client = await createClient();
+      // Local paths are uploaded first — the API only takes URLs.
+      const resolveAll = async (entries?: string[]) =>
+        entries && entries.length > 0
+          ? await Promise.all(entries.map(async (entry) => (await resolveMediaInput(client, entry)).url))
+          : undefined;
+
       const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
+      const [referenceImageUrls, referenceVideoUrls, referenceAudioUrls] = await Promise.all([
+        resolveAll(opts.refImage),
+        resolveAll(opts.refVideo),
+        resolveAll(opts.refAudio),
+      ]);
+
+      // fal rejects an audio-only reference set; fail before spending credits.
+      if (referenceAudioUrls?.length && !referenceImageUrls?.length && !referenceVideoUrls?.length) {
+        throw new CliError(
+          '--ref-audio cannot be the only reference. Add at least one --ref-image or --ref-video.',
+          'invalid_reference_audio'
+        );
+      }
+
       const run = await client.createVideoGeneration(
         {
           prompt,
@@ -221,6 +245,9 @@ export function registerGenerateCommands(program: Command): void {
           duration: opts.duration ? Number(opts.duration) : undefined,
           resolution: opts.resolution,
           image_url: imageUrl,
+          reference_image_urls: referenceImageUrls,
+          reference_video_urls: referenceVideoUrls,
+          reference_audio_urls: referenceAudioUrls,
           generate_audio: opts.audio === false ? false : undefined,
           bitrate_mode: opts.bitrateMode as ('standard' | 'high' | undefined)
         },
