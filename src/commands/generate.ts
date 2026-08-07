@@ -206,13 +206,14 @@ export function registerGenerateCommands(program: Command): void {
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent)')
     .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
+    .option('--end-image <urlOrPath>', 'Last frame the clip lands on — URL or local path, paired with --image. Supported where capabilities.endFrame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
     .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths, up to 9 — cite in the prompt as Image 1, Image 2, … (reference-to-video)')
     .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths, up to 3, 2-15s each — cite as Video 1..Video 3 (Hailuo 03 only)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, up to 3, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice ("the woman in Image 1 speaks with the voice in Audio 1"). Needs at least one --ref-image or --ref-video alongside it (Hailuo 03 only)')
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate-mode <mode>', 'Encoding bitrate for Seedance 2.0: standard or high (high = larger, higher-quality file at no extra cost)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; audio: boolean; bitrateMode?: string;
+      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string;
       refImage?: string[]; refVideo?: string[]; refAudio?: string[];
     }) => {
       const client = await createClient();
@@ -223,6 +224,16 @@ export function registerGenerateCommands(program: Command): void {
           : undefined;
 
       const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
+      const endImageUrl = opts.endImage ? (await resolveMediaInput(client, opts.endImage)).url : undefined;
+
+      // The end frame is where an image-to-video clip lands — without a start
+      // frame there is nothing to interpolate from. Fail before spending credits.
+      if (endImageUrl && !imageUrl) {
+        throw new CliError(
+          '--end-image is the LAST frame of an image-to-video clip. Pair it with --image.',
+          'missing_start_frame'
+        );
+      }
       const [referenceImageUrls, referenceVideoUrls, referenceAudioUrls] = await Promise.all([
         resolveAll(opts.refImage),
         resolveAll(opts.refVideo),
@@ -245,6 +256,7 @@ export function registerGenerateCommands(program: Command): void {
           duration: opts.duration ? Number(opts.duration) : undefined,
           resolution: opts.resolution,
           image_url: imageUrl,
+          end_image_url: endImageUrl,
           reference_image_urls: referenceImageUrls,
           reference_video_urls: referenceVideoUrls,
           reference_audio_urls: referenceAudioUrls,
