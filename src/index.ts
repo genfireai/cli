@@ -20,6 +20,14 @@ import { registerElementsCommand } from './commands/elements.js';
 import { registerBrandsCommand } from './commands/brands.js';
 import { registerGamesCommand } from './commands/games.js';
 import { registerVoicesCommand } from './commands/voices.js';
+import { registerMusicVideosCommand } from './commands/music-videos.js';
+import { registerWebhooksCommand } from './commands/webhooks.js';
+import { registerDocumentsCommand } from './commands/documents.js';
+import { registerSkillsCommand } from './commands/skills.js';
+import { registerAppsCommand } from './commands/apps.js';
+import { registerSocialCommand } from './commands/social.js';
+import { registerAdsCommand } from './commands/ads.js';
+import { registerUsageCommand } from './commands/usage.js';
 import { registerMcpCommand } from './commands/mcp.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
@@ -55,6 +63,14 @@ async function main(): Promise<void> {
   registerBrandsCommand(program);
   registerGamesCommand(program);
   registerVoicesCommand(program);
+  registerMusicVideosCommand(program);
+  registerWebhooksCommand(program);
+  registerDocumentsCommand(program);
+  registerSkillsCommand(program);
+  registerAppsCommand(program);
+  registerSocialCommand(program);
+  registerAdsCommand(program);
+  registerUsageCommand(program);
   registerMcpCommand(program);
 
   // No subcommand + interactive terminal? Drop into the TUI shell.
@@ -82,6 +98,15 @@ function reportError(err: unknown): void {
   }
   if (err instanceof GenFireApiError) {
     process.stderr.write(`API error ${err.status} (${err.code}): ${err.message}\n`);
+    // Tokens are minted with the scope set the CLI requested at login time, so a
+    // token issued by an older CLI lacks scopes newer commands need (webhooks,
+    // social, …). Re-authenticating re-mints it with the current defaults.
+    if (err.code === 'insufficient_scope') {
+      process.stderr.write(
+        'This token was issued without that scope. Run `genfire auth login` to re-authenticate ' +
+        'with the current scope set.\n'
+      );
+    }
     process.exit(1);
   }
   if (err instanceof Error) {

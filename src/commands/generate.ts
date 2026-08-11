@@ -16,7 +16,7 @@ import { readExplainerScriptFile } from './explainers.js';
 
 interface CommonGenerateOptions {
   output?: string;
-  noDownload?: boolean;
+  download: boolean;
   wait: boolean;
   waitTimeout: string;
   waitInterval: string;
@@ -68,7 +68,7 @@ function commonOptions(cmd: Command): Command {
   return cmd
     .option('-o, --output <path>', 'Where to save the output. Single file path or directory; defaults to cwd')
     .option('--no-download', "Don't download outputs locally; only print the URLs")
-    .option('--wait, --no-wait', 'Wait for the run to complete (default: wait)', true)
+    .option('--no-wait', "Don't wait for the run to finish; print the queued run and exit")
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '2s');
 }
@@ -103,7 +103,7 @@ async function maybeFinish(
   });
   process.stderr.write('\n');
 
-  if (run.status !== 'completed' || options.noDownload) {
+  if (run.status !== 'completed' || !options.download) {
     reportRunCompletion(run, []);
     return;
   }
@@ -469,6 +469,156 @@ export function registerGenerateCommands(program: Command): void {
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'lipsync', opts);
+    });
+
+  // ---- 3D model ----
+  commonOptions(
+    generate
+      .command('3d')
+      .description('Generate a 3D mesh (GLB) from one image, or 1–4 images of the same object from different angles')
+  )
+    .requiredOption('--image <urlOrPath...>', 'Source image(s), 1–4 of the SAME object. URL or local path (auto-uploaded)')
+    .option('-m, --model <model>', 'model_3d_generation alias (see: genfire models list)')
+    .option('--no-texture', 'Skip texture generation')
+    .option('--pbr', 'Generate physically-based rendering maps')
+    .option('--rigging', 'Produce a rigged skeleton')
+    .option('--animation', 'Animate the rigged mesh (requires --rigging)')
+    .option('--animation-action-id <id>', 'Animation library action, 0–696 (requires --animation)')
+    .option('--rigging-height <meters>', 'Real-world height in metres for a rigged mesh')
+    .option('--topology <type>', 'quad | triangle')
+    .option('--target-polycount <count>', 'Target poly count, 100–300000')
+    .option('--model-type <type>', 'standard | lowpoly')
+    .option('--remesh', 'Remesh the generated geometry')
+    .option('--pose-mode <mode>', 'a-pose | t-pose')
+    .option('--symmetry <mode>', 'off | auto | on')
+    .option('--texture-prompt <text>', 'Steer texturing (with textures enabled)')
+    .action(async (opts: CommonGenerateOptions & {
+      image: string[]; model?: string; texture: boolean; pbr?: boolean; rigging?: boolean;
+      animation?: boolean; animationActionId?: string; riggingHeight?: string; topology?: string;
+      targetPolycount?: string; modelType?: string; remesh?: boolean; poseMode?: string;
+      symmetry?: string; texturePrompt?: string;
+    }) => {
+      if (opts.image.length > 4) {
+        throw new CliError('--image accepts at most 4 images (multi-image-to-3D).', 'too_many_images');
+      }
+      if (opts.animation && !opts.rigging) {
+        throw new CliError('--animation requires --rigging.', 'animation_requires_rigging');
+      }
+      if (opts.topology && opts.topology !== 'quad' && opts.topology !== 'triangle') {
+        throw new CliError(`Invalid --topology: ${opts.topology}. Use quad or triangle.`, 'invalid_topology');
+      }
+      if (opts.modelType && opts.modelType !== 'standard' && opts.modelType !== 'lowpoly') {
+        throw new CliError(`Invalid --model-type: ${opts.modelType}. Use standard or lowpoly.`, 'invalid_model_type');
+      }
+      if (opts.poseMode && opts.poseMode !== 'a-pose' && opts.poseMode !== 't-pose') {
+        throw new CliError(`Invalid --pose-mode: ${opts.poseMode}. Use a-pose or t-pose.`, 'invalid_pose_mode');
+      }
+      if (opts.symmetry && !['off', 'auto', 'on'].includes(opts.symmetry)) {
+        throw new CliError(`Invalid --symmetry: ${opts.symmetry}. Use off, auto, or on.`, 'invalid_symmetry');
+      }
+
+      const polycount = opts.targetPolycount === undefined ? undefined : Number(opts.targetPolycount);
+      if (polycount !== undefined && (!Number.isInteger(polycount) || polycount < 100 || polycount > 300000)) {
+        throw new CliError('--target-polycount must be an integer between 100 and 300000.', 'invalid_target_polycount');
+      }
+      const actionId = opts.animationActionId === undefined ? undefined : Number(opts.animationActionId);
+      if (actionId !== undefined && (!Number.isInteger(actionId) || actionId < 0 || actionId > 696)) {
+        throw new CliError('--animation-action-id must be an integer between 0 and 696.', 'invalid_animation_action_id');
+      }
+      const riggingHeight = opts.riggingHeight === undefined ? undefined : Number(opts.riggingHeight);
+      if (riggingHeight !== undefined && (!Number.isFinite(riggingHeight) || riggingHeight <= 0)) {
+        throw new CliError('--rigging-height must be a positive number.', 'invalid_rigging_height');
+      }
+
+      const client = await createClient();
+      const imageUrls: string[] = [];
+      for (const image of opts.image) {
+        imageUrls.push((await resolveMediaInput(client, image)).url);
+      }
+
+      const run = await client.create3dModelGeneration(
+        {
+          image_url: imageUrls.length === 1 ? imageUrls[0] : undefined,
+          image_urls: imageUrls.length > 1 ? imageUrls : undefined,
+          model: opts.model,
+          should_texture: opts.texture,
+          enable_pbr: opts.pbr,
+          enable_rigging: opts.rigging,
+          enable_animation: opts.animation,
+          animation_action_id: actionId,
+          rigging_height_meters: riggingHeight,
+          topology: opts.topology as ('quad' | 'triangle') | undefined,
+          target_polycount: polycount,
+          model_type: opts.modelType as ('standard' | 'lowpoly') | undefined,
+          should_remesh: opts.remesh,
+          pose_mode: opts.poseMode as ('a-pose' | 't-pose') | undefined,
+          symmetry_mode: opts.symmetry as ('off' | 'auto' | 'on') | undefined,
+          texture_prompt: opts.texturePrompt
+        },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, '3d-model', opts);
+    });
+
+  // ---- upscale image ----
+  commonOptions(
+    generate
+      .command('upscale-image')
+      .description('Upscale an image 2× or 4× (Topaz)')
+  )
+    .requiredOption('--image <urlOrPath>', 'Source image URL or local path (auto-uploaded)')
+    .option('-s, --scale <factor>', 'Scale factor: 2 or 4', '2')
+    .action(async (opts: CommonGenerateOptions & { image: string; scale: string }) => {
+      const scale = Number(opts.scale);
+      if (scale !== 2 && scale !== 4) {
+        throw new CliError(`Invalid --scale: ${opts.scale}. Use 2 or 4.`, 'invalid_scale_factor');
+      }
+      const client = await createClient();
+      const sourceImageUrl = (await resolveMediaInput(client, opts.image)).url;
+      const run = await client.upscaleImage(
+        { source_image_url: sourceImageUrl, scale_factor: scale },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, 'upscaled', opts);
+    });
+
+  // ---- upscale video ----
+  commonOptions(
+    generate
+      .command('upscale-video')
+      .description('Upscale a video 2× or 4×')
+  )
+    .requiredOption('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
+    .option('-s, --scale <factor>', 'Scale factor: 2 or 4', '2')
+    .action(async (opts: CommonGenerateOptions & { video: string; scale: string }) => {
+      const scale = Number(opts.scale);
+      if (scale !== 2 && scale !== 4) {
+        throw new CliError(`Invalid --scale: ${opts.scale}. Use 2 or 4.`, 'invalid_scale_factor');
+      }
+      const client = await createClient();
+      const sourceVideoUrl = (await resolveMediaInput(client, opts.video)).url;
+      const run = await client.upscaleVideo(
+        { source_video_url: sourceVideoUrl, scale_factor: scale },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, 'upscaled', opts);
+    });
+
+  // ---- remove background ----
+  commonOptions(
+    generate
+      .command('remove-bg')
+      .description('Cut the background out of an image (BRIA)')
+  )
+    .requiredOption('--image <urlOrPath>', 'Source image URL or local path (auto-uploaded)')
+    .action(async (opts: CommonGenerateOptions & { image: string }) => {
+      const client = await createClient();
+      const imageUrl = (await resolveMediaInput(client, opts.image)).url;
+      const run = await client.removeBackground(
+        { image_url: imageUrl },
+        { idempotencyKey: randomUUID() }
+      );
+      await maybeFinish(client, run.id, 'cutout', opts);
     });
 
   // ---- faceless reel ----

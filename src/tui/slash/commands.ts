@@ -501,6 +501,246 @@ registerSlash({
   }
 });
 
+registerSlash({
+  name: 'usage',
+  summary: 'Credit spend and run counts (default: last 30 days)',
+  usage: '/usage [model|capability|day|none]',
+  requiresAuth: true,
+  execute: async ({ args, client, log }) => {
+    if (!client) return;
+    const groupBy = args[0];
+    const valid = ['model', 'capability', 'day', 'none'];
+    if (groupBy && !valid.includes(groupBy)) {
+      log(`Invalid grouping "${groupBy}". Use one of: ${valid.join(', ')}`, 'error');
+      return;
+    }
+    const summary = await client.getUsage(
+      groupBy ? { group_by: groupBy as 'model' | 'capability' | 'day' | 'none' } : {}
+    );
+    const { totals } = summary;
+    log(
+      `${totals.credits_spent.toLocaleString()} credits · ${totals.runs_count} runs ` +
+      `(${totals.successful_runs} ok, ${totals.failed_runs} failed)`,
+      'output'
+    );
+    if (summary.breakdown.length === 0) {
+      log('No usage in this period.', 'info');
+      return;
+    }
+    const rows = summary.breakdown.map((e) => [
+      e.group,
+      e.credits_spent.toLocaleString(),
+      String(e.runs_count),
+      e.avg_credits_per_run.toFixed(1)
+    ]);
+    log(fmtTable(rows, [summary.group_by, 'credits', 'runs', 'avg']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'brands',
+  summary: 'List your brand profiles',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listBrands();
+    if (response.data.length === 0) {
+      log('No brands yet. Build one with: genfire brands ingest <url>', 'info');
+      return;
+    }
+    const rows = response.data.map((b) => [b.id, b.name, b.status, b.website_url]);
+    log(fmtTable(rows, ['id', 'name', 'status', 'website']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'elements',
+  summary: 'List your saved elements',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listElements();
+    if (response.data.length === 0) {
+      log('No elements yet. Create one with: genfire elements create <name>', 'info');
+      return;
+    }
+    const rows = response.data.map((e) => [e.id, e.name, e.handle, e.source_type]);
+    log(fmtTable(rows, ['id', 'name', 'handle', 'source']), 'output');
+    log('Use in prompts by name, e.g. /generate image "<name> on a beach"', 'info');
+  }
+});
+
+registerSlash({
+  name: 'voices',
+  summary: 'List voices available for speech generation',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listVoices();
+    if (response.data.length === 0) {
+      log('No cloned voices. Stock voices: genfire voices list --include-stock', 'info');
+      return;
+    }
+    const rows = response.data.map((v) => [v.id, v.name, v.type, v.provider]);
+    log(fmtTable(rows, ['id', 'name', 'type', 'provider']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'documents',
+  summary: 'List the documents in your Drive',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listDocuments();
+    if (response.data.length === 0) {
+      log('No documents yet. Create one with: genfire documents create --html-file <path>', 'info');
+      return;
+    }
+    const rows = response.data.map((d) => [d.id, d.title, `${(d.bytes / 1024).toFixed(1)} KB`, d.url]);
+    log(fmtTable(rows, ['id', 'title', 'size', 'url']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'skills',
+  summary: 'List your installed skills',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listSkills();
+    if (response.data.length === 0) {
+      log('No skills installed. Browse the marketplace: genfire skills market', 'info');
+      return;
+    }
+    const rows = response.data.map((s) => [s.id, s.title, s.category || '', s.is_public ? 'public' : '']);
+    log(fmtTable(rows, ['id', 'title', 'category', 'visibility']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'social',
+  summary: 'List connected social accounts',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listSocialAccounts();
+    if (response.data.length === 0) {
+      log(`No connected accounts. Connect one at ${response.connect_url}`, 'info');
+      return;
+    }
+    const rows = response.data.map((a) => [
+      a.target,
+      a.platform,
+      a.username || '',
+      a.publish_enabled ? 'yes' : 'no'
+    ]);
+    log(fmtTable(rows, ['target', 'platform', 'username', 'publish']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'webhooks',
+  summary: 'List your webhook endpoints',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listWebhooks();
+    if (response.data.length === 0) {
+      log('No webhooks. Register one with: genfire webhooks create <url>', 'info');
+      return;
+    }
+    const rows = response.data.map((e) => [e.id, e.url, e.status, e.events.join(',')]);
+    log(fmtTable(rows, ['id', 'url', 'status', 'events']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'batches',
+  summary: 'List your recent batches',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listBatches({ limit: 20 });
+    if (response.data.length === 0) {
+      log('No batches yet. Create one with: genfire batch create', 'info');
+      return;
+    }
+    const rows = response.data.map((b) => [
+      b.id,
+      b.target,
+      b.status,
+      `${b.completed_items}/${b.total_items}`
+    ]);
+    log(fmtTable(rows, ['id', 'target', 'status', 'done']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'music-videos',
+  summary: 'List music-video visual style presets',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const styles = await client.listMusicVideoStyles();
+    const rows = styles.map((s) => [s.id, s.name, describe(s.description)]);
+    log(fmtTable(rows, ['id', 'name', 'description']), 'output');
+    log('Generate with: genfire music-videos create "<concept>" --style <id> --song <file>', 'info');
+  }
+});
+
+registerSlash({
+  name: 'reels',
+  summary: 'List your recurring faceless-reel subscriptions',
+  requiresAuth: true,
+  execute: async ({ client, log }) => {
+    if (!client) return;
+    const response = await client.listFacelessReelSubscriptions();
+    if (response.data.length === 0) {
+      log('No reel subscriptions. Create one with: genfire faceless-reels subscriptions create', 'info');
+      return;
+    }
+    const rows = response.data.map((s) => [
+      s.id,
+      s.label || s.presetId,
+      `${s.cadencePerDay}/day`,
+      s.enabled ? 'on' : 'off'
+    ]);
+    log(fmtTable(rows, ['id', 'label', 'cadence', 'enabled']), 'output');
+  }
+});
+
+registerSlash({
+  name: 'ads',
+  summary: 'Search competitor ad libraries',
+  usage: '/ads <brand or niche>',
+  requiresAuth: true,
+  execute: async ({ rawArgs, client, log }) => {
+    if (!client) return;
+    const query = rawArgs.trim();
+    if (!query) {
+      log('Usage: /ads <brand or niche>', 'error');
+      return;
+    }
+    const response = await client.searchAds({ query, limit: 15 });
+    if (response.data.length === 0) {
+      log(`No ads found for "${query}".`, 'info');
+      return;
+    }
+    const rows = response.data.map((ad) => {
+      const a = ad as Record<string, unknown>;
+      const days = Number(a.days_running);
+      return [
+        a.ad_id ? String(a.ad_id) : '',
+        Number.isFinite(days) ? `${days}d${days >= 45 ? ' proven' : ''}` : '',
+        a.body_text ? describe(String(a.body_text).replace(/\s+/g, ' ')).slice(0, 70) : ''
+      ];
+    });
+    log(fmtTable(rows, ['ad_id', 'running', 'text']), 'output');
+    log('45+ days running is the proven-performance signal.', 'info');
+  }
+});
+
 /**
  * Side effect: importing this file registers all built-in slash commands.
  */

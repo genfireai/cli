@@ -69,11 +69,11 @@ export function registerWorkflowCommands(program: Command): void {
     .option('-i, --inputs <pathOrJson>', 'Path to a JSON file OR a literal JSON string of inputs', '{}')
     .option('-o, --output <path>', 'Where to save downloaded outputs')
     .option('--no-download', "Don't download outputs locally")
-    .option('--wait, --no-wait', 'Wait for completion (default: wait)', true)
+    .option('--no-wait', "Don't wait for completion; print the queued run and exit")
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 30m', '30m')
     .option('--wait-interval <duration>', 'Polling interval', '3s')
     .action(async (workflowKey: string, opts: {
-      inputs: string; output?: string; noDownload?: boolean;
+      inputs: string; output?: string; download: boolean;
       wait: boolean; waitTimeout: string; waitInterval: string;
     }) => {
       const client = await createClient();
@@ -108,7 +108,7 @@ export function registerWorkflowCommands(program: Command): void {
       });
       process.stderr.write('\n');
 
-      if (completed.status !== 'completed' || opts.noDownload) {
+      if (completed.status !== 'completed' || !opts.download) {
         reportRunCompletion(completed, []);
         return;
       }

@@ -25,6 +25,8 @@ const CLI_DEFAULT_SCOPES = [
   'credits:read',
   'models:read',
   'runs:read',
+  'webhooks:read',
+  'webhooks:write',
   'images:write',
   'videos:write',
   'audio:write',

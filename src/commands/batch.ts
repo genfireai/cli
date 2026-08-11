@@ -113,12 +113,12 @@ export function registerBatchCommands(program: Command): void {
     .option('-c, --concurrency <n>', 'Items processed in parallel (1-5)', '2')
     .option('-o, --output <path>', 'Directory to save completed item outputs (one subfolder per item)')
     .option('--no-download', "Don't download outputs locally; only print the batch result")
-    .option('--wait, --no-wait', 'Wait for the batch to finish (default: wait)', true)
+    .option('--no-wait', "Don't wait for the batch; print the queued batch and exit")
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 30m, 1800s', '30m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '5s')
     .action(async (opts: {
       mode: string; target: string; items: string; concurrency: string;
-      output?: string; noDownload?: boolean;
+      output?: string; download: boolean;
       wait: boolean; waitTimeout: string; waitInterval: string;
     }) => {
       const client = await createClient();
@@ -186,7 +186,7 @@ export function registerBatchCommands(program: Command): void {
       const itemsResponse = await client.listBatchItems(finished.id);
       const written: string[] = [];
 
-      if (!opts.noDownload && finished.completed_items > 0) {
+      if (opts.download && finished.completed_items > 0) {
         for (const item of itemsResponse.data) {
           if (item.status !== 'completed' || !item.output) continue;
           const outputs = extractOutputUrls(
