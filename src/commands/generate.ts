@@ -136,8 +136,8 @@ export function registerGenerateCommands(program: Command): void {
       [] as string[]
     )
     .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
-    .option('--quality <level>', 'Image quality: low, medium, high, auto (image.gpt_image_2 only)')
-    .option('--resolution <res>', 'Output resolution: 1K, 2K, 4K (nano-banana family edit only — supply --image or @<handle>)')
+    .option('--quality <level>', 'Image quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium')
+    .option('--resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; nano-banana family edit only — supply --image or @<handle>)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; aspectRatio?: string; count?: string; image?: string[]; influencer?: string;
       quality?: string; resolution?: string;
