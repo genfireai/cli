@@ -20,7 +20,7 @@ export function registerGamesCommand(program: Command): void {
     .command('create <prompt>')
     .description('Build a playable browser game from a prompt; generates asynchronously, then prints the public play_url')
     .option('-g, --game-id <id>', 'Iterate on an existing game (re-generates in place at the same URL)')
-    .option('-m, --model <model>', 'Codegen model (e.g. claude-opus-4-8). Defaults to Opus.')
+    .option('-m, --model <model>', 'Codegen model (e.g. claude-opus-5). Defaults to Opus.')
     .option('-a, --asset <urlOrPath...>', 'Asset URL or local path (auto-uploaded) to wire in as sprites/textures/audio. Up to 16.')
     .option('--multiplayer', 'Build with realtime multiplayer (play-with-friends via the GenFire relay)')
     .option('--wait-timeout <duration>', 'Max time to wait for the build', '180s')

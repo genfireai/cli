@@ -48,7 +48,7 @@ export function registerCostCommand(program: Command): void {
     .command('speech <text>')
     .description('Estimate the credit cost of a speech generation')
     .requiredOption('-m, --model <model>', 'Public speech model alias')
-    .option('--voice-id <id>', 'Voice id (affects FAL vs ElevenLabs billing)')
+    .option('--voice-id <id>', 'Voice id (affects the billing rate)')
     .action(async (text: string, opts: { model: string; voiceId?: string }) => {
       await runEstimate({ model: opts.model, text, voice_id: opts.voiceId });
     });
@@ -81,7 +81,7 @@ export function registerCostCommand(program: Command): void {
   cost
     .command('3d')
     .description('Estimate the credit cost of a 3D model generation')
-    .requiredOption('-m, --model <model>', 'Public 3D model alias, e.g. 3d.meshy_v6')
+    .requiredOption('-m, --model <model>', 'Public 3D model alias, e.g. 3d.meshy_v7')
     .option('--no-texture', 'Mesh only (no textures)')
     .option('--pbr', 'Enable PBR maps')
     .option('--rigging', 'Enable auto-rigging')

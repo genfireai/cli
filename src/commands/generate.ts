@@ -488,6 +488,7 @@ export function registerGenerateCommands(program: Command): void {
     .option('--topology <type>', 'quad | triangle')
     .option('--target-polycount <count>', 'Target poly count, 100–300000')
     .option('--model-type <type>', 'standard | lowpoly')
+    .option('--ultra', 'Higher-fidelity geometry with finer surface detail (Meshy v7, single image only)')
     .option('--remesh', 'Remesh the generated geometry')
     .option('--pose-mode <mode>', 'a-pose | t-pose')
     .option('--symmetry <mode>', 'off | auto | on')
@@ -495,7 +496,7 @@ export function registerGenerateCommands(program: Command): void {
     .action(async (opts: CommonGenerateOptions & {
       image: string[]; model?: string; texture: boolean; pbr?: boolean; rigging?: boolean;
       animation?: boolean; animationActionId?: string; riggingHeight?: string; topology?: string;
-      targetPolycount?: string; modelType?: string; remesh?: boolean; poseMode?: string;
+      targetPolycount?: string; modelType?: string; ultra?: boolean; remesh?: boolean; poseMode?: string;
       symmetry?: string; texturePrompt?: string;
     }) => {
       if (opts.image.length > 4) {
@@ -550,6 +551,7 @@ export function registerGenerateCommands(program: Command): void {
           topology: opts.topology as ('quad' | 'triangle') | undefined,
           target_polycount: polycount,
           model_type: opts.modelType as ('standard' | 'lowpoly') | undefined,
+          ultra_mode: opts.ultra,
           should_remesh: opts.remesh,
           pose_mode: opts.poseMode as ('a-pose' | 't-pose') | undefined,
           symmetry_mode: opts.symmetry as ('off' | 'auto' | 'on') | undefined,
