@@ -27,6 +27,15 @@ interface CommonGenerateOptions {
  * `--plan-file` flag on `generate music`). The file must contain the plan
  * object itself: { sections: [...] } (music_v1) or { chunks: [...] } (music_v2).
  */
+async function readLyricsFile(path: string): Promise<string> {
+  const { readFile } = await import('node:fs/promises');
+  try {
+    return await readFile(path, 'utf8');
+  } catch (err) {
+    throw new CliError(`Could not read --lyrics-file ${path}: ${(err as Error).message}`, 'invalid_lyrics_file');
+  }
+}
+
 async function readMusicPlanFile(path: string): Promise<Record<string, unknown>> {
   const { readFile } = await import('node:fs/promises');
   let raw: string;
@@ -364,8 +373,8 @@ export function registerGenerateCommands(program: Command): void {
       .command('music [prompt]')
       .description('Generate music from a prompt, or from a composition plan via --plan-file')
   )
-    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.lyria3_pro)')
-    .option('-d, --duration <seconds>', 'Duration in seconds, 3-600 (ElevenLabs prompt mode only)')
+    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.lyria3_pro | music.minimax_music_3)')
+    .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria 3 Pro ignores it')
     .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
     .option('--seed <n>', 'Random seed for more consistent results (with --plan-file only)')
     .option('--flex-sections', 'Let music_v1 flex section durations of a --plan-file for quality (durations are strict by default)')
@@ -373,9 +382,14 @@ export function registerGenerateCommands(program: Command): void {
     .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs prompt mode only)')
     .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3 Pro only)')
     .option('--negative-prompt <text>', 'What to exclude from the audio (Lyria 3 Pro only)')
+    .option('--lyrics <text>', 'Lyrics to sing — REQUIRED for music.minimax_music_3. Each structure tag ([verse], [chorus], ...) on its own line')
+    .option('--lyrics-file <path>', 'Read the lyrics from a text file instead of --lyrics')
+    .option('--steps <n>', 'Flow-matching steps per 8s chunk, 1-100 (MiniMax Music 3 only)')
+    .option('--guidance <n>', 'Classifier-free guidance scale, 0-20 (MiniMax Music 3 only)')
     .action(async (prompt: string | undefined, opts: CommonGenerateOptions & {
       model?: string; duration?: string; planFile?: string; seed?: string; flexSections?: boolean;
       format?: string; instrumental?: boolean; imageUrl?: string; negativePrompt?: string;
+      lyrics?: string; lyricsFile?: string; steps?: string; guidance?: string;
     }) => {
       const compositionPlan = opts.planFile ? await readMusicPlanFile(opts.planFile) : undefined;
       if (!prompt && !compositionPlan) {
@@ -383,6 +397,20 @@ export function registerGenerateCommands(program: Command): void {
       }
       if (prompt && compositionPlan) {
         throw new CliError('A prompt and --plan-file cannot be used together.', 'invalid_arguments');
+      }
+      if (opts.lyrics && opts.lyricsFile) {
+        throw new CliError('--lyrics and --lyrics-file cannot be used together.', 'invalid_arguments');
+      }
+      const lyrics = opts.lyricsFile
+        ? await readLyricsFile(opts.lyricsFile)
+        : opts.lyrics;
+      // MiniMax Music 3 sings supplied lyrics and writes none of its own —
+      // fail here rather than after a round-trip to the API.
+      if (opts.model === 'music.minimax_music_3' && !lyrics?.trim()) {
+        throw new CliError(
+          'music.minimax_music_3 requires lyrics — pass --lyrics or --lyrics-file. Use music.lyria3_pro to have the model write the words.',
+          'missing_lyrics'
+        );
       }
       const client = await createClient();
       const run = await client.createMusic(
@@ -396,7 +424,10 @@ export function registerGenerateCommands(program: Command): void {
           output_format: opts.format,
           force_instrumental: opts.instrumental,
           image_url: opts.imageUrl,
-          negative_prompt: opts.negativePrompt
+          negative_prompt: opts.negativePrompt,
+          lyrics: lyrics?.trim() || undefined,
+          num_inference_steps: opts.steps ? Number(opts.steps) : undefined,
+          guidance_scale: opts.guidance ? Number(opts.guidance) : undefined
         },
         { idempotencyKey: randomUUID() }
       );
