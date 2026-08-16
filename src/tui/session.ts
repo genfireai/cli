@@ -46,7 +46,8 @@ const CLI_DEFAULT_SCOPES = [
   'elements:read',
   'elements:write',
   'brands:read',
-  'brands:write'
+  'brands:write',
+  'moodboards:read'
 ] as const;
 
 export interface LoginOptions {
