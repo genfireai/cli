@@ -17,11 +17,25 @@ export function registerRunsCommand(program: Command): void {
 
   runs
     .command('list')
-    .description('List recent runs')
+    .description('List or search past runs')
+    // --search is a FULL-history search (server-side), not a filter over the
+    // page: --limit bounds the results, never how far back it looks.
+    .option('-q, --search <keyword>', 'Search all history by prompt, topic, title, model or kind (all words must match)')
     .option('-s, --status <status>', 'Filter by status: queued, processing, completed, failed')
     .option('-c, --capability <capability>', 'Filter by capability, e.g. image_generation')
+    .option('--since <date>', 'Only runs created on/after this ISO date, e.g. 2026-03-01')
+    .option('--until <date>', 'Only runs created on/before this ISO date')
+    .option('--cursor <cursor>', 'Continue from a previous page (its next_cursor)')
     .option('-l, --limit <n>', 'Max runs to return', '25')
-    .action(async (opts: { status?: string; capability?: string; limit: string }) => {
+    .action(async (opts: {
+      search?: string;
+      status?: string;
+      capability?: string;
+      since?: string;
+      until?: string;
+      cursor?: string;
+      limit: string;
+    }) => {
       const client = await createClient();
       const limit = Number(opts.limit);
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -31,28 +45,43 @@ export function registerRunsCommand(program: Command): void {
       if (opts.status && !validStatuses.has(opts.status)) {
         throw new CliError(`Invalid --status: ${opts.status}`, 'invalid_status');
       }
+      for (const [flag, value] of [['--since', opts.since], ['--until', opts.until]] as const) {
+        if (value && Number.isNaN(new Date(value).getTime())) {
+          throw new CliError(`${flag} must be an ISO date, e.g. 2026-03-01`, 'invalid_date');
+        }
+      }
 
       const response = await client.listRuns({
         status: opts.status as ('queued' | 'processing' | 'completed' | 'failed') | undefined,
         capability: opts.capability,
-        limit
+        limit,
+        q: opts.search,
+        starting_after: opts.cursor,
+        created_after: opts.since,
+        created_before: opts.until
       });
 
       printResult(response, () => {
         if (response.data.length === 0) {
-          process.stdout.write(`${dim('No runs match.')}\n`);
-          return;
+          process.stdout.write(`${dim(opts.search ? 'No runs match that search.' : 'No runs match.')}\n`);
+        } else {
+          printTable(
+            response.data.map((run) => ({
+              id: run.id,
+              status: statusColor(run.status),
+              capability: run.capability,
+              model: run.model || '',
+              created: run.created_at.replace('T', ' ').slice(0, 19)
+            })),
+            ['id', 'status', 'capability', 'model', 'created']
+          );
         }
-        printTable(
-          response.data.map((run) => ({
-            id: run.id,
-            status: statusColor(run.status),
-            capability: run.capability,
-            model: run.model || '',
-            created: run.created_at.replace('T', ' ').slice(0, 19)
-          })),
-          ['id', 'status', 'capability', 'model', 'created']
-        );
+        if (response.has_more && response.next_cursor) {
+          const through = response.scanned_through
+            ? ` (searched back to ${response.scanned_through.slice(0, 10)})`
+            : '';
+          process.stdout.write(`${dim(`More runs${through} — continue with --cursor ${response.next_cursor}`)}\n`);
+        }
       });
     });
 

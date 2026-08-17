@@ -173,8 +173,8 @@ registerSlash({
 
 registerSlash({
   name: 'runs',
-  summary: 'List recent runs. Use /runs <id> to inspect a single run.',
-  usage: '/runs [runId | --limit N | --status completed]',
+  summary: 'List or search past runs. Use /runs <id> to inspect a single run.',
+  usage: '/runs [runId | --search dragon | --limit N | --status completed]',
   requiresAuth: true,
   execute: async ({ args, client, log }) => {
     if (!client) return;
@@ -202,12 +202,15 @@ registerSlash({
     }
     const limitIdx = args.indexOf('--limit');
     const statusIdx = args.indexOf('--status');
+    const searchIdx = args.indexOf('--search');
     const response = await client.listRuns({
       limit: limitIdx !== -1 ? Number(args[limitIdx + 1]) : 20,
-      status: statusIdx !== -1 ? (args[statusIdx + 1] as any) : undefined
+      status: statusIdx !== -1 ? (args[statusIdx + 1] as any) : undefined,
+      // Searched server-side across the whole history, not just these 20 rows.
+      q: searchIdx !== -1 ? args[searchIdx + 1] : undefined
     });
     if (response.data.length === 0) {
-      log('No runs.', 'info');
+      log(searchIdx !== -1 ? 'No runs match that search.' : 'No runs.', 'info');
       return;
     }
     const rows = response.data.map((r) => [
