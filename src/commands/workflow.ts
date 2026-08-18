@@ -13,7 +13,7 @@ import {
 } from '../runHelpers.js';
 
 export function registerWorkflowCommands(program: Command): void {
-  const workflow = program.command('workflow').description('Run and inspect GenFire workflows (graph-based pipelines)');
+  const workflow = program.command('workflow').description('Run and inspect Genfire workflows (graph-based pipelines)');
 
   workflow
     .command('list')

@@ -104,11 +104,11 @@ async function validateKey(apiKey: string, baseUrl: string): Promise<{ accountId
 }
 
 export function registerAuthCommands(program: Command): void {
-  const auth = program.command('auth').description('Manage GenFire CLI authentication');
+  const auth = program.command('auth').description('Manage Genfire CLI authentication');
 
   auth
     .command('login')
-    .description('Authenticate with GenFire via your web browser')
+    .description('Authenticate with Genfire via your web browser')
     .option('--api-key <key>', 'Skip the browser flow and store this API key directly')
     .option('--no-browser', "Don't try to open the browser; just print the URL")
     .option('--label <label>', 'Display label for the issued API key', deviceLabel())

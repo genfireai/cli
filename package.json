@@ -1,7 +1,7 @@
 {
   "name": "@genfire/cli",
   "version": "0.19.0",
-  "description": "Command-line interface for the GenFire generative media platform",
+  "description": "Command-line interface for the Genfire generative media platform",
   "keywords": [
     "genfire",
     "cli",
@@ -18,7 +18,7 @@
   "bugs": {
     "url": "https://github.com/genfireai/cli/issues"
   },
-  "author": "GenFire Team",
+  "author": "Genfire Team",
   "license": "MIT",
   "type": "module",
   "bin": {

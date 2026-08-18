@@ -22,7 +22,7 @@ export function registerGamesCommand(program: Command): void {
     .option('-g, --game-id <id>', 'Iterate on an existing game (re-generates in place at the same URL)')
     .option('-m, --model <model>', 'Codegen model (e.g. claude-opus-5). Defaults to Opus.')
     .option('-a, --asset <urlOrPath...>', 'Asset URL or local path (auto-uploaded) to wire in as sprites/textures/audio. Up to 16.')
-    .option('--multiplayer', 'Build with realtime multiplayer (play-with-friends via the GenFire relay)')
+    .option('--multiplayer', 'Build with realtime multiplayer (play-with-friends via the Genfire relay)')
     .option('--wait-timeout <duration>', 'Max time to wait for the build', '180s')
     .option('--wait-interval <duration>', 'Polling interval', '3s')
     .action(async (prompt: string, opts: {
@@ -86,7 +86,7 @@ export function registerGamesCommand(program: Command): void {
 
   games
     .command('publish <gameId>')
-    .description('Publish a completed game to the public GenFire gallery (genfire.ai/games)')
+    .description('Publish a completed game to the public Genfire gallery (genfire.ai/games)')
     .action(async (gameId: string) => {
       const client = await createClient();
       const result = await publishGame(client, gameId, true);
@@ -97,7 +97,7 @@ export function registerGamesCommand(program: Command): void {
 
   games
     .command('unpublish <gameId>')
-    .description('Remove a game from the public GenFire gallery (it stays playable via its play_url)')
+    .description('Remove a game from the public Genfire gallery (it stays playable via its play_url)')
     .action(async (gameId: string) => {
       const client = await createClient();
       const result = await publishGame(client, gameId, false);

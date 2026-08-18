@@ -35,7 +35,7 @@ registerSlash({
 
 registerSlash({
   name: 'quit',
-  summary: 'Exit the GenFire CLI',
+  summary: 'Exit the Genfire CLI',
   execute: async () => {
     useTuiStore.getState().requestExit();
   }

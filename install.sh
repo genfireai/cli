@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GenFire CLI installer
+# Genfire CLI installer
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.2.0
@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
       SKIP_NODE_INSTALL=1; shift ;;
     -h|--help)
       cat <<EOF
-GenFire CLI installer
+Genfire CLI installer
 
 Usage:
   curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh
@@ -160,7 +160,7 @@ verify_path() {
 
 # --- run ---------------------------------------------------------------------
 say ""
-say "  Installing the GenFire CLI"
+say "  Installing the Genfire CLI"
 say "  ────────────────────────────"
 say ""
 

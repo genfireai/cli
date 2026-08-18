@@ -12,7 +12,7 @@ export function registerCostCommand(program: Command): void {
     .requiredOption('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2')
     .option('-n, --count <n>', 'Number of images')
     .option('-r, --resolution <res>', 'Resolution (e.g. 1K, 2K, 4K)')
-    .option('-q, --quality <quality>', 'Quality tier (low, medium, high) — GPT Image 2 / GenFire')
+    .option('-q, --quality <quality>', 'Quality tier (low, medium, high) — GPT Image 2 / Genfire')
     .action(async (_prompt: string, opts: { model: string; count?: string; resolution?: string; quality?: string }) => {
       await runEstimate({
         model: opts.model,

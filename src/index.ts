@@ -38,7 +38,7 @@ async function main(): Promise<void> {
 
   program
     .name('genfire')
-    .description('GenFire generative media CLI')
+    .description('Genfire generative media CLI')
     .version(VERSION)
     .option('--json', 'Emit machine-readable JSON to stdout instead of pretty output')
     .option('--no-color', "Disable ANSI color in pretty output")

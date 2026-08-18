@@ -80,11 +80,11 @@ async function setupConfigFile(path: string, apiKey: string): Promise<'created' 
 }
 
 export function registerMcpCommand(program: Command): void {
-  const mcp = program.command('mcp').description('Manage GenFire MCP server configuration');
+  const mcp = program.command('mcp').description('Manage Genfire MCP server configuration');
 
   mcp
     .command('setup')
-    .description('Configure the GenFire MCP server in your AI client using your stored credentials')
+    .description('Configure the Genfire MCP server in your AI client using your stored credentials')
     .option('--client <client>', 'Target client: claude-code (default), claude-desktop, or cursor')
     .option('--api-key <key>', 'Use this API key instead of the stored credential')
     .action(async (options: { client?: string; apiKey?: string }) => {
@@ -116,7 +116,7 @@ export function registerMcpCommand(program: Command): void {
           { ok: true, client, url: MCP_SERVER_URL },
           () => {
             process.stderr.write(
-              `${green('GenFire MCP configured for Claude Code.')}\n` +
+              `${green('Genfire MCP configured for Claude Code.')}\n` +
               `${dim('Server:')} ${cyan(MCP_SERVER_URL)}\n` +
               `${dim('Run')} ${bold('/mcp')} ${dim('in Claude Code to confirm 22 tools are connected.')}\n`
             );
@@ -132,7 +132,7 @@ export function registerMcpCommand(program: Command): void {
         { ok: true, client, config_path: configPath, action, url: MCP_SERVER_URL },
         () => {
           process.stderr.write(
-            `${green(`GenFire MCP ${action === 'created' ? 'added to' : 'updated in'} ${client === 'cursor' ? 'Cursor' : 'Claude Desktop'}`)}\n` +
+            `${green(`Genfire MCP ${action === 'created' ? 'added to' : 'updated in'} ${client === 'cursor' ? 'Cursor' : 'Claude Desktop'}`)}\n` +
             `${dim('Config:')} ${configPath}\n` +
             `${dim('Server:')} ${cyan(MCP_SERVER_URL)}\n` +
             `${yellow('Restart')} ${client === 'cursor' ? 'Cursor' : 'Claude Desktop'} ${dim('then check MCP tools are available.')}\n`

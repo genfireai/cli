@@ -1,6 +1,6 @@
-# GenFire CLI
+# Genfire CLI
 
-Command-line interface for [GenFire](https://genfire.ai) — generate images, videos, speech, music, and sound effects, and run multi-step workflows from your terminal.
+Command-line interface for [Genfire](https://genfire.ai) — generate images, videos, speech, music, and sound effects, and run multi-step workflows from your terminal.
 
 ## Install
 
@@ -38,7 +38,7 @@ genfire generate image "a neon-lit alley at dusk" -o alley.png
 
 ## Use with Claude Code
 
-After installing the CLI, install the GenFire Skills bundle inside Claude Code:
+After installing the CLI, install the Genfire Skills bundle inside Claude Code:
 
 ```
 /plugin marketplace add genfireai/skills
@@ -95,7 +95,7 @@ genfire auth logout
 
 ### MCP setup
 
-After logging in, one command configures the GenFire MCP server in your AI client — no manual key pasting:
+After logging in, one command configures the Genfire MCP server in your AI client — no manual key pasting:
 
 ```bash
 genfire mcp setup                         # Claude Code (default)
@@ -103,7 +103,7 @@ genfire mcp setup --client claude-desktop
 genfire mcp setup --client cursor
 ```
 
-This reads the key from your keychain and writes the correct MCP config. Restart your client, then run `/mcp` (Claude Code) or check MCP settings to confirm the GenFire tools are connected (~100 in the default profile; the `/lite` profile exposes a trimmed set).
+This reads the key from your keychain and writes the correct MCP config. Restart your client, then run `/mcp` (Claude Code) or check MCP settings to confirm the Genfire tools are connected (~100 in the default profile; the `/lite` profile exposes a trimmed set).
 
 ## Commands
 
@@ -183,7 +183,7 @@ genfire batch items <batchId> [-o out/]
 
 ### Workflows
 
-GenFire's workflow system lets you chain multiple generations into one pipeline. Use `genfire workflow` to run published workflows from the CLI:
+Genfire's workflow system lets you chain multiple generations into one pipeline. Use `genfire workflow` to run published workflows from the CLI:
 
 ```bash
 genfire workflow list
@@ -195,7 +195,7 @@ genfire workflow run  hook_pack --inputs vars.json -o results/
 
 ### Influencers
 
-Train influencer characters in the [GenFire dashboard](https://genfire.ai/dashboard/influencers), then reference them in CLI prompts with `@<handle>` to inject identity-preserving conditioning. The CLI auto-switches to the model's edit variant and adds the influencer's reference photos behind the scenes.
+Train influencer characters in the [Genfire dashboard](https://genfire.ai/dashboard/influencers), then reference them in CLI prompts with `@<handle>` to inject identity-preserving conditioning. The CLI auto-switches to the model's edit variant and adds the influencer's reference photos behind the scenes.
 
 ```bash
 genfire influencers list                    # show your ready influencers

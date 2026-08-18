@@ -1,5 +1,5 @@
 /**
- * GenFire TUI color palette. One source of truth — never hardcode hex
+ * Genfire TUI color palette. One source of truth — never hardcode hex
  * codes inside components. Keeps the brand consistent across screens.
  */
 export const palette = {

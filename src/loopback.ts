@@ -21,7 +21,7 @@ export interface LoopbackResult {
 export async function startLoopback(): Promise<{ url: string; stop: () => Promise<void> }> {
   const server = createServer((_req: IncomingMessage, res: ServerResponse) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<html><body style="font-family: system-ui; padding: 2rem;">GenFire CLI is listening. You can close this tab.</body></html>');
+    res.end('<html><body style="font-family: system-ui; padding: 2rem;">Genfire CLI is listening. You can close this tab.</body></html>');
   });
 
   await new Promise<void>((resolve, reject) => {

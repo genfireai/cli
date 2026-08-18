@@ -739,8 +739,8 @@ export function registerGenerateCommands(program: Command): void {
         (value: string, previous: string[]) => previous.concat([value]),
         [] as string[]
       )
-      .option('--script-file <path>', 'JSON file with a structured script ({ cast?, beats: [...] }) — authors every beat yourself; GenFire makes zero LLM calls')
-      .option('--custom-script-file <path>', 'Plain-text file narrated verbatim (GenFire still storyboards the visuals)');
+      .option('--script-file <path>', 'JSON file with a structured script ({ cast?, beats: [...] }) — authors every beat yourself; Genfire makes zero LLM calls')
+      .option('--custom-script-file <path>', 'Plain-text file narrated verbatim (Genfire still storyboards the visuals)');
     // Explainers render in tens of minutes — bump the default wait window.
     const ewt = explainer.options.find((o) => o.long === '--wait-timeout');
     if (ewt) ewt.defaultValue = '45m';
