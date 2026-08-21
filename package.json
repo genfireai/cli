@@ -1,6 +1,6 @@
 {
   "name": "@genfire/cli",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Command-line interface for the Genfire generative media platform",
   "keywords": [
     "genfire",
@@ -40,7 +40,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@genfire/sdk": "^0.20.0",
+    "@genfire/sdk": "^0.21.0",
     "commander": "^12.1.0",
     "ink": "^7.0.2",
     "ink-big-text": "^2.0.0",

@@ -619,19 +619,45 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('upscale-video')
-      .description('Upscale a video 2× or 4×')
+      .description('Upscale a video — Topaz 2×/4× (default) or Flux 1.5×–3×')
   )
     .requiredOption('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
-    .option('-s, --scale <factor>', 'Scale factor: 2 or 4', '2')
-    .action(async (opts: CommonGenerateOptions & { video: string; scale: string }) => {
+    .option('-s, --scale <factor>', 'Scale factor: 2 or 4 (Topaz), 1.5–3 (Flux)', '2')
+    .option('-e, --engine <engine>', 'Engine: topaz or flux', 'topaz')
+    .option('--mode <mode>', 'Flux only: precise or creative', 'creative')
+    .option('--prompt <text>', 'Flux only: guides the creative pass')
+    .action(async (opts: CommonGenerateOptions & { video: string; scale: string; engine: string; mode: string; prompt?: string }) => {
+      const engine = String(opts.engine || 'topaz').toLowerCase();
+      if (engine !== 'topaz' && engine !== 'flux') {
+        throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz or flux.`, 'invalid_engine');
+      }
       const scale = Number(opts.scale);
-      if (scale !== 2 && scale !== 4) {
+      // Each engine validates only its own range — Flux takes a float, Topaz
+      // the integer pair the command has always accepted.
+      if (engine === 'flux') {
+        if (!Number.isFinite(scale) || scale < 1.5 || scale > 3) {
+          throw new CliError(`Invalid --scale: ${opts.scale}. Flux accepts 1.5–3.`, 'invalid_scale_factor');
+        }
+        if (opts.mode !== 'precise' && opts.mode !== 'creative') {
+          throw new CliError(`Invalid --mode: ${opts.mode}. Use precise or creative.`, 'invalid_mode');
+        }
+      } else if (scale !== 2 && scale !== 4) {
         throw new CliError(`Invalid --scale: ${opts.scale}. Use 2 or 4.`, 'invalid_scale_factor');
       }
       const client = await createClient();
       const sourceVideoUrl = (await resolveMediaInput(client, opts.video)).url;
       const run = await client.upscaleVideo(
-        { source_video_url: sourceVideoUrl, scale_factor: scale },
+        {
+          source_video_url: sourceVideoUrl,
+          scale_factor: scale,
+          ...(engine === 'flux'
+            ? {
+                model: 'video_upscale.flux_video_upscale' as const,
+                mode: opts.mode as 'precise' | 'creative',
+                ...(opts.prompt ? { prompt: opts.prompt } : {}),
+              }
+            : {}),
+        },
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'upscaled', opts);
@@ -727,6 +753,8 @@ export function registerGenerateCommands(program: Command): void {
       .option('-d, --duration <seconds>', 'Target length in seconds (20–600); ignored with --script-file')
       .option('--voice-id <id>', 'TTS voice id')
       .option('--motion-level <level>', 'How many scenes get real video clips: full | mixed | stills')
+      .option('--continuity <mode>', 'How animated scenes join: seamless (default, continuous footage) | cuts (scene by scene)')
+      .option('--allow-duplicate', 'Render an authored script even if it re-tells an episode you already made')
       .option('--music-source <source>', 'none | preset | ai | library', 'none')
       .option('--music-preset <id>', 'Music preset id (with --music-source preset)')
       .option('--music-prompt <text>', 'Prompt for an AI-generated track (with --music-source ai)')
@@ -746,6 +774,7 @@ export function registerGenerateCommands(program: Command): void {
     if (ewt) ewt.defaultValue = '45m';
     explainer.action(async (topic: string, opts: CommonGenerateOptions & {
       style?: string; aspectRatio?: string; duration?: string; voiceId?: string; motionLevel?: string;
+      continuity?: string; allowDuplicate?: boolean;
       musicSource?: string; musicPreset?: string; musicPrompt?: string;
       captionPreset?: string; captionPosition?: string; captionMode?: string;
       ref?: string[]; scriptFile?: string; customScriptFile?: string;
@@ -798,6 +827,8 @@ export function registerGenerateCommands(program: Command): void {
           target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
           voice_id: opts.voiceId,
           motion_level: opts.motionLevel as ('full' | 'mixed' | 'stills') | undefined,
+          continuity: opts.continuity as ('seamless' | 'cuts') | undefined,
+          ...(opts.allowDuplicate ? { allow_duplicate: true } : {}),
           music,
           caption_preset_id: opts.captionPreset,
           caption_position: opts.captionPosition as ('top' | 'middle' | 'bottom') | undefined,
