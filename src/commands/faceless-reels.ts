@@ -124,7 +124,7 @@ export function registerFacelessReelsCommand(program: Command): void {
 
   subs
     .command('create')
-    .description('Create a recurring reel subscription')
+    .description('Create a faceless channel (a recurring series; "subscription" is legacy naming)')
     .option('--label <name>', 'A name for the Story')
     .option('-p, --preset <id>', 'Niche preset id')
     .option('-s, --style <id>', 'Visual style id')
@@ -139,11 +139,20 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--cadence-per-day <n>', 'Reels per day (1–6)')
     .option('--slots <list>', 'Comma-separated local "HH:mm" times (count must equal cadence)')
     .option('--timezone <tz>', 'IANA timezone, e.g. America/New_York')
+    .option('--niche <id>', 'Channel niche id (education, history, kids, storytelling, …)')
+    .option('--format <f>', "'shorts' (9:16 reels) or 'longform' (16:9 explainers) — picks the engine")
+    .option('--tagline <text>', 'One-line pitch under the channel name')
+    .option('--description <text>', 'Longer channel description')
+    .option('--avatar-url <url>', 'Square channel avatar image URL (https)')
+    .option('--episode-aspect <ar>', "Episode default aspect ratio: 16:9 | 9:16")
+    .option('--episode-motion <m>', 'Episode default motion: seamless | scenes | stills')
     .option('--disabled', 'Create the schedule paused')
     .action(async (opts: {
       label?: string; preset?: string; style?: string; captionPreset?: string; voiceId?: string;
       vibe?: string; animatedHook?: boolean; videoModel?: string; duration?: string; topicSource?: string; topicSeeds?: string; cadencePerDay?: string;
       slots?: string; timezone?: string; disabled?: boolean;
+      niche?: string; format?: string; tagline?: string; description?: string; avatarUrl?: string;
+      episodeAspect?: string; episodeMotion?: string;
     }) => {
       const client = await createClient();
       const sub = await client.createFacelessReelSubscription({
@@ -161,6 +170,15 @@ export function registerFacelessReelsCommand(program: Command): void {
         cadence_per_day: opts.cadencePerDay ? Number(opts.cadencePerDay) : undefined,
         slots: opts.slots ? opts.slots.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         timezone: opts.timezone,
+        niche: opts.niche,
+        format: opts.format as ('shorts' | 'longform') | undefined,
+        tagline: opts.tagline,
+        description: opts.description,
+        avatar_url: opts.avatarUrl,
+        episode_defaults: (opts.episodeAspect || opts.episodeMotion) ? {
+          aspect_ratio: opts.episodeAspect as ('16:9' | '9:16') | undefined,
+          motion_style: opts.episodeMotion as ('seamless' | 'scenes' | 'stills') | undefined,
+        } : undefined,
         enabled: opts.disabled ? false : undefined
       });
       printResult(sub, () => {
@@ -183,12 +201,21 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('--cadence-per-day <n>', 'Reels per day (1–6)')
     .option('--slots <list>', 'Comma-separated local "HH:mm" times')
     .option('--timezone <tz>', 'IANA timezone')
+    .option('--niche <id>', 'Channel niche id (education, history, kids, storytelling, …)')
+    .option('--format <f>', "'shorts' (9:16 reels) or 'longform' (16:9 explainers) — picks the engine")
+    .option('--tagline <text>', 'One-line pitch under the channel name')
+    .option('--description <text>', 'Longer channel description')
+    .option('--avatar-url <url>', 'Square channel avatar image URL (https)')
+    .option('--episode-aspect <ar>', "Episode default aspect ratio: 16:9 | 9:16")
+    .option('--episode-motion <m>', 'Episode default motion: seamless | scenes | stills')
     .option('--enable', 'Resume the schedule')
     .option('--disable', 'Pause the schedule')
     .action(async (id: string, opts: {
       label?: string; preset?: string; style?: string; captionPreset?: string; voiceId?: string;
       vibe?: string; animatedHook?: boolean; videoModel?: string; duration?: string; cadencePerDay?: string; slots?: string; timezone?: string;
       enable?: boolean; disable?: boolean;
+      niche?: string; format?: string; tagline?: string; description?: string; avatarUrl?: string;
+      episodeAspect?: string; episodeMotion?: string;
     }) => {
       const client = await createClient();
       const sub = await client.updateFacelessReelSubscription(id, {
@@ -204,6 +231,15 @@ export function registerFacelessReelsCommand(program: Command): void {
         cadence_per_day: opts.cadencePerDay ? Number(opts.cadencePerDay) : undefined,
         slots: opts.slots ? opts.slots.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         timezone: opts.timezone,
+        niche: opts.niche,
+        format: opts.format as ('shorts' | 'longform') | undefined,
+        tagline: opts.tagline,
+        description: opts.description,
+        avatar_url: opts.avatarUrl,
+        episode_defaults: (opts.episodeAspect || opts.episodeMotion) ? {
+          aspect_ratio: opts.episodeAspect as ('16:9' | '9:16') | undefined,
+          motion_style: opts.episodeMotion as ('seamless' | 'scenes' | 'stills') | undefined,
+        } : undefined,
         enabled: opts.enable ? true : opts.disable ? false : undefined
       });
       printResult(sub, () => {
