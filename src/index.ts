@@ -22,6 +22,7 @@ import { registerGamesCommand } from './commands/games.js';
 import { registerVoicesCommand } from './commands/voices.js';
 import { registerMusicVideosCommand } from './commands/music-videos.js';
 import { registerBooksCommand } from './commands/books.js';
+import { registerColoringCommand } from './commands/coloring.js';
 import { registerWebhooksCommand } from './commands/webhooks.js';
 import { registerDocumentsCommand } from './commands/documents.js';
 import { registerSkillsCommand } from './commands/skills.js';
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   registerVoicesCommand(program);
   registerMusicVideosCommand(program);
   registerBooksCommand(program);
+registerColoringCommand(program);
   registerWebhooksCommand(program);
   registerDocumentsCommand(program);
   registerSkillsCommand(program);
