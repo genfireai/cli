@@ -48,8 +48,12 @@ const CLI_DEFAULT_SCOPES = [
   'brands:read',
   'brands:write',
   'moodboards:read',
+  'projects:read',
+  'projects:write',
   'marketing:read',
-  'teams:read'
+  'teams:read',
+  'tasks:read',
+  'tasks:write'
 ] as const;
 
 export interface LoginOptions {
