@@ -41,6 +41,8 @@ const CLI_DEFAULT_SCOPES = [
   'reels:write',
   'social:read',
   'social:write',
+  'adsmanage:read',
+  'adsmanage:write',
   'batches:read',
   'batches:write',
   'uploads:write',
