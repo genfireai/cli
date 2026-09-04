@@ -218,12 +218,13 @@ export function registerGenerateCommands(program: Command): void {
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on — URL or local path, paired with --image. Supported where capabilities.endFrame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
     .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths, up to 9 — cite in the prompt as Image 1, Image 2, … (reference-to-video)')
     .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths, up to 3, 2-15s each — cite as Video 1..Video 3 (Hailuo 03 only)')
+    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, up to 3, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice ("the woman in Image 1 speaks with the voice in Audio 1"). Needs at least one --ref-image or --ref-video alongside it (Hailuo 03 only)')
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate-mode <mode>', 'Encoding bitrate for Seedance 2.0: standard or high (high = larger, higher-quality file at no extra cost)')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string;
-      refImage?: string[]; refVideo?: string[]; refAudio?: string[];
+      refImage?: string[]; refVideo?: string[]; refVideoTrim?: string[]; refAudio?: string[];
     }) => {
       const client = await createClient();
       // Local paths are uploaded first — the API only takes URLs.
@@ -249,6 +250,25 @@ export function registerGenerateCommands(program: Command): void {
         resolveAll(opts.refAudio),
       ]);
 
+      // --ref-video-trim N:START-END → { index, start, end }. Parsed here so a
+      // typo fails before any credits are spent.
+      const referenceVideoTrims = (opts.refVideoTrim ?? []).map((spec) => {
+        const m = /^(\d+):(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(spec.trim());
+        if (!m) {
+          throw new CliError(`--ref-video-trim "${spec}" must look like N:START-END (e.g. 1:3-8).`, 'invalid_reference_video_trim');
+        }
+        const index = Number(m[1]);
+        const start = Number(m[2]);
+        const end = Number(m[3]);
+        if (!referenceVideoUrls || index >= referenceVideoUrls.length) {
+          throw new CliError(`--ref-video-trim ${spec}: there is no --ref-video #${index} (0-based).`, 'invalid_reference_video_trim');
+        }
+        if (end <= start) {
+          throw new CliError(`--ref-video-trim ${spec}: END must be after START.`, 'invalid_reference_video_trim');
+        }
+        return { index, start, end };
+      });
+
       // fal rejects an audio-only reference set; fail before spending credits.
       if (referenceAudioUrls?.length && !referenceImageUrls?.length && !referenceVideoUrls?.length) {
         throw new CliError(
@@ -268,6 +288,9 @@ export function registerGenerateCommands(program: Command): void {
           end_image_url: endImageUrl,
           reference_image_urls: referenceImageUrls,
           reference_video_urls: referenceVideoUrls,
+          // Typed in @genfire/sdk from the release that adds reference_video_trims;
+          // the API accepts it today, so pass it through ahead of the type bump.
+          ...(referenceVideoTrims.length > 0 ? ({ reference_video_trims: referenceVideoTrims } as Record<string, unknown>) : {}),
           reference_audio_urls: referenceAudioUrls,
           generate_audio: opts.audio === false ? false : undefined,
           bitrate_mode: opts.bitrateMode as ('standard' | 'high' | undefined)
