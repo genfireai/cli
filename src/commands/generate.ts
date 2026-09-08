@@ -313,14 +313,24 @@ export function registerGenerateCommands(program: Command): void {
     .option('--audio-url <url...>', 'Reference audio URL(s), up to 3 — reference in the text as @Audio1–@Audio3 (Seed Audio 1.0 only)')
     .option('--image-url <url>', 'Reference image URL, not combinable with --audio-url (Seed Audio 1.0 only)')
     .option('--sample-rate <hz>', 'Output sample rate in Hz: 8000|16000|24000|32000|44100|48000 (Seed Audio 1.0 only)')
-    .option('--speed <speed>', 'Speech speed 0.5–2 (Seed Audio 1.0 only)')
+    .option('--speed <speed>', 'Speaking rate: ElevenLabs 0.7–1.2, Seed Audio 0.5–2')
     .option('--volume <volume>', 'Volume 0.5–2 (Seed Audio 1.0 only)')
     .option('--pitch <semitones>', 'Pitch shift in semitones -12..12 (Seed Audio 1.0 only)')
+    .option('--language <code>', 'ISO 639-1 code to enforce, e.g. es (ElevenLabs Flash/Turbo/v3 only)')
+    .option('--seed <n>', 'Seed for best-effort reproducibility (ElevenLabs only)')
+    .option('--previous-text <text>', 'Text spoken right BEFORE this chunk — stitching context (ElevenLabs only)')
+    .option('--next-text <text>', 'Text spoken right AFTER this chunk — stitching context (ElevenLabs only)')
+    .option('--normalize <mode>', 'Text normalization: auto | on | off (ElevenLabs only)')
+    .option('--timestamps', 'Include per-word timings in the run output (ElevenLabs only)')
     .action(async (text: string, opts: CommonGenerateOptions & {
       model?: string; voiceId?: string; voiceName?: string; format?: string;
       audioUrl?: string[]; imageUrl?: string; sampleRate?: string; speed?: string; volume?: string; pitch?: string;
+      language?: string; seed?: string; previousText?: string; nextText?: string; normalize?: string; timestamps?: boolean;
     }) => {
       const client = await createClient();
+      if (opts.normalize && !['auto', 'on', 'off'].includes(opts.normalize)) {
+        throw new CliError('--normalize must be auto, on or off', 'invalid_option');
+      }
       const run = await client.createSpeech(
         {
           text,
@@ -328,6 +338,12 @@ export function registerGenerateCommands(program: Command): void {
           voice_name: opts.voiceName,
           model: opts.model,
           output_format: opts.format,
+          language_code: opts.language,
+          seed: opts.seed ? Number(opts.seed) : undefined,
+          previous_text: opts.previousText,
+          next_text: opts.nextText,
+          apply_text_normalization: opts.normalize as 'auto' | 'on' | 'off' | undefined,
+          with_timestamps: opts.timestamps || undefined,
           audio_urls: opts.audioUrl && opts.audioUrl.length > 0 ? opts.audioUrl.slice(0, 3) : undefined,
           image_url: opts.imageUrl,
           sample_rate: opts.sampleRate ? Number(opts.sampleRate) : undefined,
@@ -343,22 +359,35 @@ export function registerGenerateCommands(program: Command): void {
   // ---- transcribe ----
   generate
     .command('transcribe <url>')
-    .description('Transcribe audio/video to text (Whisper). Accepts a direct audio/video URL or a YouTube URL.')
-    .option('-m, --model <model>', 'Transcription model alias')
+    .description('Transcribe audio/video to text (Whisper by default, or ElevenLabs Scribe v2 with -m transcription.elevenlabs_scribe_v2 for speaker labels, keyterms and 90+ languages). Accepts a direct audio/video URL or a YouTube URL.')
+    .option('-m, --model <model>', 'Transcription model alias: transcription.whisper_v1 (default) | transcription.elevenlabs_scribe_v2')
     .option('--video', 'Treat the URL as a video source (extract audio before transcribing)')
     .option('--youtube', 'Treat the URL as a YouTube link')
+    .option('--language <code>', 'Spoken language, ISO 639-1 (Scribe only; omit to auto-detect)')
+    .option('--speakers <n>', 'Expected speaker count 1–32 (Scribe only)')
+    .option('--no-diarize', 'Skip speaker labelling (Scribe only)')
+    .option('--keyterm <term...>', 'Vocabulary to bias recognition towards (Scribe only)')
+    .option('--clean', 'Drop fillers and disfluencies (Scribe only)')
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '3s')
     .action(async (url: string, opts: {
       model?: string; video?: boolean; youtube?: boolean;
+      language?: string; speakers?: string; diarize?: boolean; keyterm?: string[]; clean?: boolean;
       waitTimeout: string; waitInterval: string;
     }) => {
       const client = await createClient();
+      const scribe = {
+        language: opts.language,
+        num_speakers: opts.speakers ? Number(opts.speakers) : undefined,
+        diarize: opts.diarize === false ? false : undefined,
+        keyterms: opts.keyterm && opts.keyterm.length > 0 ? opts.keyterm : undefined,
+        no_verbatim: opts.clean || undefined
+      };
       const body = opts.youtube
-        ? { youtube_url: url, model: opts.model }
+        ? { youtube_url: url, model: opts.model, ...scribe }
         : opts.video
-          ? { video_url: url, model: opts.model }
-          : { audio_url: url, model: opts.model };
+          ? { video_url: url, model: opts.model, ...scribe }
+          : { audio_url: url, model: opts.model, ...scribe };
 
       const run = await client.createTranscription(body, { idempotencyKey: randomUUID() });
 
