@@ -83,7 +83,7 @@ export function registerInfluencersCommand(program: Command): void {
         const resolved = await resolveMediaInput(client, photo);
         photoUrls.push(resolved.url);
       }
-      process.stdout.write(`${dim('Generating reference sheet to lock identity (this is billable, ~30–60s)…')}\n`);
+      process.stdout.write(`${dim('Generating your influencer from these photos (hero portrait + reference sheet, billable, ~60–120s)…')}\n`);
       const influencer = await client.createInfluencer({ handle, photoUrls });
       printCreated(influencer);
     });
