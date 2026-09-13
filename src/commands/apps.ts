@@ -110,10 +110,11 @@ export function registerAppsCommand(program: Command): void {
     .option('--brief <text>', 'Short description of what this is')
     .option('--kind <kind>', 'app (default) or website')
     .option('--app-id <id>', 'Redeploy over an existing app')
+    .option('--team <teamId>', 'Bill the deploy to a workspace credit pool instead of your own balance')
     .option('--no-wait', "Don't wait for the deploy; print the queued run and exit")
     .option('--wait-timeout <minutes>', 'Maximum minutes to wait', '5')
     .action(async (opts: {
-      file: string; title?: string; brief?: string; kind?: string; appId?: string;
+      file: string; title?: string; brief?: string; kind?: string; appId?: string; team?: string;
       wait: boolean; waitTimeout: string;
     }) => {
       let html: string;
@@ -145,8 +146,11 @@ export function registerAppsCommand(program: Command): void {
           title: opts.title,
           brief: opts.brief,
           kind: parseKind(opts.kind),
-          app_id: opts.appId
-        },
+          app_id: opts.appId,
+          // Not on the pinned SDK's DeployAppRequest yet — see the scopeFields
+          // note in commands/generate.ts. The route takes it today.
+          ...(opts.team ? { team_id: opts.team } : {})
+        } as any,
         { idempotencyKey: randomUUID() }
       );
 

@@ -20,6 +20,30 @@ interface CommonGenerateOptions {
   wait: boolean;
   waitTimeout: string;
   waitInterval: string;
+  /** --team: which credit pool pays. */
+  team?: string;
+  /** --project: where the output is filed. Only on commands whose capability files. */
+  project?: string;
+  /** --quote: spend a price `genfire cost estimate` already showed. */
+  quote?: string;
+}
+
+/**
+ * `--team` / `--project` / `--quote`, as the wire fields the API takes.
+ *
+ * Spread into the request and cast at the call site rather than typed on the
+ * SDK request objects: the CLI pins @genfire/sdk 0.23.0, whose request types
+ * predate run scoping and price quotes. The SDK SOURCE in this repo carries
+ * them now (TeamBillable / ProjectFileable / Quotable), so these casts come out
+ * on the next SDK cut — same arrangement as `publicApiRequest` in client.ts.
+ * The API accepts all three today.
+ */
+function scopeFields(opts: CommonGenerateOptions): Record<string, string> {
+  return {
+    ...(opts.team ? { team_id: opts.team } : {}),
+    ...(opts.project ? { project_id: opts.project } : {}),
+    ...(opts.quote ? { quote_token: opts.quote } : {})
+  };
 }
 
 /**
@@ -73,13 +97,25 @@ function parseDurationSeconds(value: string, flag: string): number {
   return Math.round(amount * 1000);
 }
 
-function commonOptions(cmd: Command): Command {
-  return cmd
+/**
+ * `fileable` is not cosmetic. `project_id` is a 400
+ * (`project_filing_unsupported`) on any capability whose output is not an
+ * image, video or audio a project can hold — upscales, 3D models and faceless
+ * reels among them — so the flag is offered only where the API will take it,
+ * rather than accepted here and rejected at the far end.
+ */
+function commonOptions(cmd: Command, opts: { fileable?: boolean } = {}): Command {
+  const withCommon = cmd
     .option('-o, --output <path>', 'Where to save the output. Single file path or directory; defaults to cwd')
     .option('--no-download', "Don't download outputs locally; only print the URLs")
     .option('--no-wait', "Don't wait for the run to finish; print the queued run and exit")
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
-    .option('--wait-interval <duration>', 'Polling interval while waiting', '2s');
+    .option('--wait-interval <duration>', 'Polling interval while waiting', '2s')
+    .option('--team <teamId>', 'Bill this run to a workspace credit pool instead of your own balance')
+    .option('--quote <token>', 'A quote_token from `genfire cost estimate` — charges the price you were quoted');
+  return opts.fileable
+    ? withCommon.option('--project <projectId>', 'File the result into this project when it completes')
+    : withCommon;
 }
 
 async function maybeFinish(
@@ -134,7 +170,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('image <prompt>')
       .description('Generate one or more images from a prompt. Use @<handle> to reference a trained influencer.')
-  )
+  , { fileable: true })
     .option('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, e.g. 1:1, 16:9')
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
@@ -197,8 +233,9 @@ export function registerGenerateCommands(program: Command): void {
           image_urls: imageUrls,
           mentions,
           quality: opts.quality as 'low' | 'medium' | 'high' | 'auto' | undefined,
-          resolution: opts.resolution as '1K' | '2K' | '4K' | undefined
-        },
+          resolution: opts.resolution as '1K' | '2K' | '4K' | undefined,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'image', opts);
@@ -209,21 +246,23 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('video <prompt>')
       .description('Generate a video from a prompt (and optional reference image)')
-  )
+  , { fileable: true })
     .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1)')
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent)')
     .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
     .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on — URL or local path, paired with --image. Supported where capabilities.endFrame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
-    .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths, up to 9 — cite in the prompt as Image 1, Image 2, … (reference-to-video)')
-    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths, up to 3, 2-15s each — cite as Video 1..Video 3 (Hailuo 03 only)')
+    .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5')
+    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 1.8-30.2s, 30.2s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits or transfers motion from')
     .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, up to 3, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice ("the woman in Image 1 speaks with the voice in Audio 1"). Needs at least one --ref-image or --ref-video alongside it (Hailuo 03 only)')
     .option('--no-audio', 'Disable audio generation if the model supports it')
-    .option('--bitrate-mode <mode>', 'Encoding bitrate for Seedance 2.0: standard or high (high = larger, higher-quality file at no extra cost)')
+    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
+    .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
+    .option('--task <task>', 'GENFIRE GEDI, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire gedi presets')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string;
+      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string; bitrate?: string; task?: string;
       refImage?: string[]; refVideo?: string[]; refVideoTrim?: string[]; refAudio?: string[];
     }) => {
       const client = await createClient();
@@ -277,6 +316,23 @@ export function registerGenerateCommands(program: Command): void {
         );
       }
 
+      // Genfire Gedi. Checked here so a typo, or an edit with nothing to edit,
+      // costs a message rather than a round trip and a reservation.
+      const bitrateMode = opts.bitrate ?? opts.bitrateMode;
+      if (bitrateMode && bitrateMode !== 'standard' && bitrateMode !== 'high') {
+        throw new CliError('--bitrate must be standard or high.', 'invalid_bitrate_mode');
+      }
+      const task = opts.task?.trim().toLowerCase();
+      if (task && !['reference', 'editing', 'extension'].includes(task)) {
+        throw new CliError('--task must be reference, editing or extension.', 'invalid_task');
+      }
+      if ((task === 'editing' || task === 'extension') && !referenceVideoUrls?.length) {
+        throw new CliError(
+          `--task ${task} works on an existing clip. Pass it with --ref-video (and cite it as @Video1 in the prompt).`,
+          'task_requires_reference_video'
+        );
+      }
+
       const run = await client.createVideoGeneration(
         {
           prompt,
@@ -293,8 +349,12 @@ export function registerGenerateCommands(program: Command): void {
           ...(referenceVideoTrims.length > 0 ? ({ reference_video_trims: referenceVideoTrims } as Record<string, unknown>) : {}),
           reference_audio_urls: referenceAudioUrls,
           generate_audio: opts.audio === false ? false : undefined,
-          bitrate_mode: opts.bitrateMode as ('standard' | 'high' | undefined)
-        },
+          bitrate_mode: bitrateMode as ('standard' | 'high' | undefined),
+          // Typed in @genfire/sdk from the release that adds `task`; the API
+          // accepts it today, so pass it through ahead of the type bump.
+          ...(task ? ({ task } as Record<string, unknown>) : {}),
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'video', opts);
@@ -305,7 +365,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('speech <text>')
       .description('Synthesize speech from text')
-  )
+  , { fileable: true })
     .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
     .option('-m, --model <model>', 'Speech model alias')
     .option('--voice-name <name>', 'Optional friendly voice name for logs')
@@ -349,8 +409,9 @@ export function registerGenerateCommands(program: Command): void {
           sample_rate: opts.sampleRate ? Number(opts.sampleRate) : undefined,
           speed: opts.speed ? Number(opts.speed) : undefined,
           volume: opts.volume ? Number(opts.volume) : undefined,
-          pitch: opts.pitch ? Number(opts.pitch) : undefined
-        },
+          pitch: opts.pitch ? Number(opts.pitch) : undefined,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'speech', opts);
@@ -368,11 +429,15 @@ export function registerGenerateCommands(program: Command): void {
     .option('--no-diarize', 'Skip speaker labelling (Scribe only)')
     .option('--keyterm <term...>', 'Vocabulary to bias recognition towards (Scribe only)')
     .option('--clean', 'Drop fillers and disfluencies (Scribe only)')
+    .option('--team <teamId>', 'Bill this run to a workspace credit pool instead of your own balance')
+    .option('--project <projectId>', 'File the transcript against its source audio in this project')
+    .option('--quote <token>', 'A quote_token from `genfire cost estimate` — charges the price you were quoted')
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '3s')
     .action(async (url: string, opts: {
       model?: string; video?: boolean; youtube?: boolean;
       language?: string; speakers?: string; diarize?: boolean; keyterm?: string[]; clean?: boolean;
+      team?: string; project?: string; quote?: string;
       waitTimeout: string; waitInterval: string;
     }) => {
       const client = await createClient();
@@ -383,13 +448,14 @@ export function registerGenerateCommands(program: Command): void {
         keyterms: opts.keyterm && opts.keyterm.length > 0 ? opts.keyterm : undefined,
         no_verbatim: opts.clean || undefined
       };
+      const scope = scopeFields(opts as CommonGenerateOptions);
       const body = opts.youtube
-        ? { youtube_url: url, model: opts.model, ...scribe }
+        ? { youtube_url: url, model: opts.model, ...scribe, ...scope }
         : opts.video
-          ? { video_url: url, model: opts.model, ...scribe }
-          : { audio_url: url, model: opts.model, ...scribe };
+          ? { video_url: url, model: opts.model, ...scribe, ...scope }
+          : { audio_url: url, model: opts.model, ...scribe, ...scope };
 
-      const run = await client.createTranscription(body, { idempotencyKey: randomUUID() });
+      const run = await client.createTranscription(body as any, { idempotencyKey: randomUUID() });
 
       process.stderr.write(`${dim(`Polling run ${run.id}...`)}\n`);
       const finished = await waitForRun(client, run.id, {
@@ -424,7 +490,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('music [prompt]')
       .description('Generate music from a prompt, or from a composition plan via --plan-file')
-  )
+  , { fileable: true })
     .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.lyria3_pro | music.minimax_music_3)')
     .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria 3 Pro ignores it')
     .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
@@ -479,8 +545,9 @@ export function registerGenerateCommands(program: Command): void {
           negative_prompt: opts.negativePrompt,
           lyrics: lyrics?.trim() || undefined,
           num_inference_steps: opts.steps ? Number(opts.steps) : undefined,
-          guidance_scale: opts.guidance ? Number(opts.guidance) : undefined
-        },
+          guidance_scale: opts.guidance ? Number(opts.guidance) : undefined,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'music', opts);
@@ -491,7 +558,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('sfx <prompt>')
       .description('Generate a sound effect from a prompt')
-  )
+  , { fileable: true })
     .option('-m, --model <model>', 'SFX model alias')
     .option('-d, --duration <seconds>', 'Duration in seconds')
     .option('--format <format>', 'Output format')
@@ -508,8 +575,9 @@ export function registerGenerateCommands(program: Command): void {
           duration_seconds: opts.duration ? Number(opts.duration) : undefined,
           output_format: opts.format,
           prompt_influence: opts.promptInfluence ? Number(opts.promptInfluence) : undefined,
-          loop: opts.loop
-        },
+          loop: opts.loop,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'sfx', opts);
@@ -520,7 +588,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('lipsync')
       .description('Lip-sync a video to an audio track')
-  )
+  , { fileable: true })
     .requiredOption('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
     .requiredOption('--audio <urlOrPath>', 'Source audio URL or local path (auto-uploaded)')
     .option('-m, --model <model>', 'Lipsync model alias')
@@ -547,8 +615,9 @@ export function registerGenerateCommands(program: Command): void {
           sync_mode: opts.syncMode as ('cut_off' | 'loop' | 'bounce' | 'silence' | 'remap') | undefined,
           title: opts.title,
           description: opts.description,
-          duration: opts.duration ? Number(opts.duration) : undefined
-        },
+          duration: opts.duration ? Number(opts.duration) : undefined,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'lipsync', opts);
@@ -638,8 +707,9 @@ export function registerGenerateCommands(program: Command): void {
           should_remesh: opts.remesh,
           pose_mode: opts.poseMode as ('a-pose' | 't-pose') | undefined,
           symmetry_mode: opts.symmetry as ('off' | 'auto' | 'on') | undefined,
-          texture_prompt: opts.texturePrompt
-        },
+          texture_prompt: opts.texturePrompt,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, '3d-model', opts);
@@ -661,7 +731,7 @@ export function registerGenerateCommands(program: Command): void {
       const client = await createClient();
       const sourceImageUrl = (await resolveMediaInput(client, opts.image)).url;
       const run = await client.upscaleImage(
-        { source_image_url: sourceImageUrl, scale_factor: scale },
+        { source_image_url: sourceImageUrl, scale_factor: scale, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'upscaled', opts);
@@ -709,7 +779,8 @@ export function registerGenerateCommands(program: Command): void {
                 ...(opts.prompt ? { prompt: opts.prompt } : {}),
               }
             : {}),
-        },
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'upscaled', opts);
@@ -720,13 +791,13 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('remove-bg')
       .description('Cut the background out of an image (BRIA)')
-  )
+  , { fileable: true })
     .requiredOption('--image <urlOrPath>', 'Source image URL or local path (auto-uploaded)')
     .action(async (opts: CommonGenerateOptions & { image: string }) => {
       const client = await createClient();
       const imageUrl = (await resolveMediaInput(client, opts.image)).url;
       const run = await client.removeBackground(
-        { image_url: imageUrl },
+        { image_url: imageUrl, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'cutout', opts);
@@ -782,8 +853,9 @@ export function registerGenerateCommands(program: Command): void {
           animated_hook: opts.animatedHook,
           video_model: opts.videoModel as ('grok' | 'seedance-mini') | undefined,
           direction: opts.direction,
-          music
-        },
+          music,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'faceless-reel', opts);
@@ -799,7 +871,7 @@ export function registerGenerateCommands(program: Command): void {
       generate
         .command('explainer <topic>')
         .description('Generate an explainer film (20s–10min, 16:9 or 9:16): script → voiceover → style-locked frames → per-scene video clips → composed film')
-    )
+    , { fileable: true })
       .option('-s, --style <id>', 'Visual style id (see: genfire explainers styles)')
       .option('-a, --aspect-ratio <ar>', 'Aspect ratio: 16:9 (default) or 9:16')
       .option('-d, --duration <seconds>', 'Target length in seconds (20–600); ignored with --script-file')
@@ -885,8 +957,9 @@ export function registerGenerateCommands(program: Command): void {
           caption_preset_id: opts.captionPreset,
           caption_position: opts.captionPosition as ('top' | 'middle' | 'bottom') | undefined,
           caption_mode: opts.captionMode as ('full' | 'keywords') | undefined,
-          reference_images: referenceImages
-        },
+          reference_images: referenceImages,
+          ...scopeFields(opts)
+        } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'explainer', opts);

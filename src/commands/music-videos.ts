@@ -99,10 +99,14 @@ export function registerMusicVideosCommand(program: Command): void {
     .option('--no-download', "Don't download the output; only print the URL")
     .option('--no-wait', 'Return the queued run immediately instead of polling')
     .option('--wait-timeout <minutes>', 'Maximum minutes to wait', '30')
+    .option('--team <teamId>', 'Bill this run to a workspace credit pool instead of your own balance')
+    .option('--project <projectId>', 'File the finished video into this project')
+    .option('--quote <token>', 'A quote_token from `genfire music-videos estimate-cost` — charges the price you were quoted')
     .action(async (concept: string, opts: {
       style: string; song?: string; songTitle?: string; songPrompt?: string; songDuration?: string;
       instrumental?: boolean; transcribeLyrics?: boolean; aspectRatio?: string; sceneDensity?: string;
       lyricCaptions?: boolean; influencerId?: string; referenceImage?: string[];
+      team?: string; project?: string; quote?: string;
       output?: string; download: boolean; wait: boolean; waitTimeout: string;
     }) => {
       if (!opts.song && !opts.songPrompt) {
@@ -154,7 +158,18 @@ export function registerMusicVideosCommand(program: Command): void {
         }
       }
 
-      const run = await client.createMusicVideo(body, { idempotencyKey: randomUUID() });
+      // team_id / project_id / quote_token are not on the pinned SDK's request
+      // type yet (see the note on scopeFields in commands/generate.ts); the API
+      // takes all three today.
+      const run = await client.createMusicVideo(
+        {
+          ...body,
+          ...(opts.team ? { team_id: opts.team } : {}),
+          ...(opts.project ? { project_id: opts.project } : {}),
+          ...(opts.quote ? { quote_token: opts.quote } : {})
+        } as any,
+        { idempotencyKey: randomUUID() }
+      );
 
       if (!opts.wait) {
         printResult(run, () => {

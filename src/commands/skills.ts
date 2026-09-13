@@ -74,7 +74,7 @@ export function registerSkillsCommand(program: Command): void {
     .option('-f, --file <path>', 'Path to the SKILL.md markdown body')
     .option('-c, --content <markdown>', 'Inline markdown body (alternative to --file)')
     .option('--prompt <text>', 'Prompt-only skill (alternative to a markdown body)')
-    .option('-d, --description <text>', 'Short description (max 300 chars)')
+    .option('-d, --description <text>', 'Short description (max 500 chars)')
     .option('--category <name>', 'Category (max 40 chars)')
     .option('--slug <slug>', 'URL slug (defaults to a slugified title)')
     .option('-v, --version <semver>', 'Version string', '1.0.0')

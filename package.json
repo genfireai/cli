@@ -1,6 +1,6 @@
 {
   "name": "@genfire/cli",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Command-line interface for the Genfire generative media platform",
   "keywords": [
     "genfire",

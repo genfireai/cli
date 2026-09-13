@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, printResult, printTable } from '../output.js';
+import { registerCanvasWorkflowRunCommands, registerWorkflowEstimateCommand } from './presets.js';
 import {
   downloadOutputs,
   extractOutputUrls,
@@ -14,6 +15,15 @@ import {
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program.command('workflow').description('Run and inspect Genfire workflows (graph-based pipelines)');
+
+  // `workflow estimate`, `run-canvas` and `run-status` speak to a user-owned
+  // CANVAS (/v1/user-workflows), a different collection from the published
+  // registry the three commands below read — `run` there takes a workflow KEY
+  // and a flat input object, `run-canvas` here takes a canvas id, a node
+  // selection and a quote. All three live in commands/presets.ts with the
+  // other canvas-surface calls.
+  registerWorkflowEstimateCommand(workflow);
+  registerCanvasWorkflowRunCommands(workflow);
 
   workflow
     .command('list')

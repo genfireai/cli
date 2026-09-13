@@ -14,7 +14,8 @@ export function registerUsageCommand(program: Command): void {
     .option('-e, --end <date>', 'ISO end date')
     .option('-g, --group-by <field>', 'model (default) | capability | day | none', 'model')
     .option('-c, --capability <name>', "Restrict to one capability, e.g. 'video_generation'")
-    .action(async (opts: { start?: string; end?: string; groupBy: string; capability?: string }) => {
+    .option('--team <teamId>', "A WORKSPACE's spend instead of your own. Not a filter — a pool's spend lives in the pool's own ledger, so this switches the source")
+    .action(async (opts: { start?: string; end?: string; groupBy: string; capability?: string; team?: string }) => {
       if (!GROUP_BY.has(opts.groupBy as UsageGroupBy)) {
         throw new CliError(
           `Invalid --group-by: ${opts.groupBy}. Use ${[...GROUP_BY].join(', ')}.`,
@@ -32,8 +33,11 @@ export function registerUsageCommand(program: Command): void {
         start_date: opts.start,
         end_date: opts.end,
         group_by: opts.groupBy as UsageGroupBy,
-        capability: opts.capability
-      });
+        capability: opts.capability,
+        // Not on the pinned SDK's GetUsageParams yet — see the scopeFields note
+        // in commands/generate.ts. The API takes it today.
+        ...(opts.team ? { team_id: opts.team } : {})
+      } as any);
 
       printResult(summary, () => {
         const { totals, period } = summary;

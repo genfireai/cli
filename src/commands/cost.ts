@@ -133,6 +133,17 @@ async function runEstimate(input: EstimateCostRequest): Promise<void> {
         const tag = remaining < 0 ? yellow(`(would go negative by ${-remaining})`) : `(${remaining} remaining)`;
         process.stdout.write(`${dim('Balance:')}  ${credits.balance} ${tag}\n`);
       }
+      // The RECEIPT. Without it the price above is a number the user was shown
+      // and the charge is whatever the submit recomputes; with it, `--quote`
+      // binds the two. Not on the pinned SDK's CostEstimate type yet (the SDK
+      // source carries it) — see the scopeFields note in commands/generate.ts.
+      const quote = estimate as unknown as { quote_token?: string; expires_at?: string };
+      if (quote.quote_token) {
+        process.stdout.write(
+          `${dim('Quote:')}    ${quote.quote_token}\n` +
+          `${dim(`          pass it as --quote to be charged this price${quote.expires_at ? ` (expires ${quote.expires_at})` : ''}\n`)}`
+        );
+      }
     }
   );
 }

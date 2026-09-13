@@ -3,15 +3,18 @@ import { BatchItem, GenFireApiError } from '@genfire/sdk';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { createClient } from '../client.js';
+import { createClient, publicApiRequest } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, green, printResult, printTable, red, yellow } from '../output.js';
 import { downloadOutputs, extractOutputUrls } from '../runHelpers.js';
 
 const VALID_MODES = new Set(['workflow', 'operation']);
+// Mirrors PUBLIC_API_BATCH_OPERATION_TARGETS on the server. Speech only for
+// audio — music and sound effects are not batchable.
 const VALID_OPERATION_TARGETS = new Set([
   'images.generations.create',
-  'videos.generations.create'
+  'videos.generations.create',
+  'audio.speech.create'
 ]);
 
 function statusColor(status: string): string {
@@ -41,7 +44,7 @@ function parseDurationMs(value: string, flag: string): number {
  * array of input objects `[{...}, ...]` (auto-wrapped), so users don't have
  * to hand-write the `input` envelope for every row.
  */
-async function loadItems(value: string): Promise<Array<{ input: Record<string, unknown> }>> {
+async function loadItems(value: string): Promise<Array<{ input: Record<string, unknown>; custom_id?: string }>> {
   const trimmed = value.trim();
   if (!trimmed) {
     throw new CliError('--items is required (path to a JSON file or a JSON array).', 'invalid_items');
@@ -88,7 +91,17 @@ async function loadItems(value: string): Promise<Array<{ input: Record<string, u
       typeof obj.input === 'object' &&
       !Array.isArray(obj.input)
     ) {
-      return { input: obj.input as Record<string, unknown> };
+      const customId = typeof obj.custom_id === 'string' ? obj.custom_id.trim() : '';
+      if (customId.length > 64) {
+        throw new CliError(
+          `--items[${i}].custom_id is ${customId.length} characters; the maximum is 64.`,
+          'invalid_custom_id'
+        );
+      }
+      return {
+        input: obj.input as Record<string, unknown>,
+        ...(customId ? { custom_id: customId } : {})
+      };
     }
     return { input: obj };
   });
@@ -104,12 +117,13 @@ export function registerBatchCommands(program: Command): void {
     .requiredOption('--mode <mode>', 'Batch mode: operation | workflow')
     .requiredOption(
       '--target <target>',
-      'Operation (images.generations.create | videos.generations.create) or a workflow key'
+      `Operation (${[...VALID_OPERATION_TARGETS].join(' | ')}) or a workflow key`
     )
     .requiredOption(
       '--items <pathOrJson>',
-      'Path to a JSON file OR a literal JSON array. Each entry is { "input": {...} } or a bare input object (auto-wrapped).'
+      'Path to a JSON file OR a literal JSON array. Each entry is { "input": {...} } (optionally with "custom_id") or a bare input object (auto-wrapped).'
     )
+    .option('--team <teamId>', 'Bill the whole batch to a team pool instead of your own balance')
     .option('-c, --concurrency <n>', 'Items processed in parallel (1-5)', '2')
     .option('-o, --output <path>', 'Directory to save completed item outputs (one subfolder per item)')
     .option('--no-download', "Don't download outputs locally; only print the batch result")
@@ -118,6 +132,7 @@ export function registerBatchCommands(program: Command): void {
     .option('--wait-interval <duration>', 'Polling interval while waiting', '5s')
     .action(async (opts: {
       mode: string; target: string; items: string; concurrency: string;
+      team?: string;
       output?: string; download: boolean;
       wait: boolean; waitTimeout: string; waitInterval: string;
     }) => {
@@ -139,13 +154,16 @@ export function registerBatchCommands(program: Command): void {
 
       const items = await loadItems(opts.items);
 
+      // `custom_id` and `team_id` are not in the published SDK's request types
+      // yet (a separate SDK pass owns that); the API accepts both today.
       const created = await client.createBatch(
         {
           mode: opts.mode as 'operation' | 'workflow',
           target: opts.target,
           concurrency,
+          ...(opts.team ? { team_id: opts.team } : {}),
           items
-        },
+        } as any,
         { idempotencyKey: randomUUID() }
       );
 
@@ -350,15 +368,47 @@ export function registerBatchCommands(program: Command): void {
         printTable(
           response.data.map((item: BatchItem) => ({
             index: item.index,
+            id: item.id,
+            custom_id: (item as any).custom_id || '',
             status: statusColor(item.status),
+            attempt: (item as any).attempt ?? 0,
             run_id: item.run_id || '',
             error: item.error?.message ? item.error.message.slice(0, 60) : ''
           })),
-          ['index', 'status', 'run_id', 'error']
+          ['index', 'id', 'custom_id', 'status', 'attempt', 'run_id', 'error']
         );
         for (const path of written) {
           process.stderr.write(`${dim('Saved:')} ${path}\n`);
         }
+        const failed = response.data.filter((item: BatchItem) => item.status === 'failed');
+        if (failed.length > 0) {
+          process.stderr.write(
+            `${dim('Retry a failed item with:')} genfire batch retry ${batchId} ${failed[0].id}\n`
+          );
+        }
+      });
+    });
+
+  // ---- retry ----
+  // Per item, not per batch: one provider timeout in a 50-item run should not
+  // mean re-paying for the 49 that worked.
+  batch
+    .command('retry <batchId> <itemId>')
+    .description('Re-run one FAILED item in a batch (bills again, like submitting it fresh)')
+    .action(async (batchId: string, itemId: string) => {
+      // Not on the SDK yet — a separate SDK pass owns that.
+      const item = await publicApiRequest<BatchItem & { attempt?: number; custom_id?: string | null }>(
+        'POST',
+        `/batches/${encodeURIComponent(batchId)}/items/${encodeURIComponent(itemId)}/retry`
+      );
+
+      printResult(item, () => {
+        process.stderr.write(
+          `${yellow(`Item ${item.index} re-queued`)} ${dim(
+            `(${item.id}, attempt ${item.attempt ?? 0}, status ${item.status})\n`
+          )}`
+        );
+        process.stderr.write(`${dim('Track it with:')} genfire batch items ${batchId}\n`);
       });
     });
 }

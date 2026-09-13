@@ -4,6 +4,7 @@ import { mkdir, stat } from 'node:fs/promises';
 import { dirname, basename, extname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { publicApiRequest } from './client.js';
 import { CliError } from './errors.js';
 import { dim, green, yellow, printResult } from './output.js';
 
@@ -49,6 +50,111 @@ export async function waitForRun(client: GenFireClient, runId: string, options: 
 
   throw new CliError(
     `Run ${runId} did not complete within ${Math.round(timeoutMs / 1000)}s. The run may still finish later — check with \`genfire runs get ${runId}\`.`,
+    'wait_timeout'
+  );
+}
+
+/** One node's state inside a canvas run. */
+export interface CanvasRunNode {
+  nodeId: string;
+  status: string;
+  error?: string;
+  output: { type: string; url?: string; text?: string } | null;
+}
+
+export interface CanvasRunDeliverable {
+  node_id: string;
+  kind: string;
+  output: { type: string; url?: string; text?: string };
+}
+
+/** What `GET /v1/user-workflows/{workflowId}/runs/{runId}` answers. */
+export interface CanvasWorkflowRunStatus {
+  runId: string;
+  workflowId: string;
+  pageId: string;
+  status: string;
+  totalCostCredits: number;
+  workflowRev: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  nodes: CanvasRunNode[];
+  output: { deliverables: CanvasRunDeliverable[]; intermediates: CanvasRunDeliverable[] };
+}
+
+// A canvas run is 'cancelled'-terminal as well as completed/failed — the
+// executor writes all three (backend RunStatus), and waiting past a cancel
+// would burn the whole timeout for a run that is never coming back.
+const CANVAS_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+export interface CanvasWaitOptions {
+  intervalMs?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onTick?: (run: CanvasWorkflowRunStatus, elapsedMs: number) => void;
+  /**
+   * Transport seam, defaulted to the live `publicApiRequest`. Only the tests
+   * pass it — they stand in a fake so the polled PATH can be asserted, which
+   * is the entire bug this helper exists for.
+   */
+  request?: typeof publicApiRequest;
+}
+
+/** The only route a canvas run is readable on. */
+export function canvasRunPath(workflowId: string, runId: string): string {
+  return `/user-workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}`;
+}
+
+/**
+ * `waitForRun` for a CANVAS run — a `workflow run-canvas`, or a `preset run`,
+ * whose 202 is a canvas kickoff under the caller's own instantiated copy.
+ *
+ * Separate from `waitForRun` because the run document lives under
+ * `workflows/{workflowId}/runs/{runId}` and is readable ONLY at
+ * `GET /v1/user-workflows/{workflowId}/runs/{runId}`. `GET /v1/runs/{id}`
+ * looks in the flat run collection and answers 404 `run_not_found` — which,
+ * on the first poll of a run the server has ALREADY billed, surfaced as a
+ * failed command for a generation that was in fact running.
+ *
+ * Same backoff and timeout as `waitForRun`; only the route and the terminal
+ * set differ.
+ */
+export async function waitForCanvasRun(
+  workflowId: string,
+  runId: string,
+  options: CanvasWaitOptions = {}
+): Promise<CanvasWorkflowRunStatus> {
+  const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
+  const timeoutMs = options.timeoutMs ?? POLL_MAX_MS;
+  const request = options.request ?? publicApiRequest;
+  const startedAt = Date.now();
+  const read = () => request<CanvasWorkflowRunStatus>('GET', canvasRunPath(workflowId, runId));
+
+  let run = await read();
+  if (CANVAS_TERMINAL_STATUSES.has(run.status)) {
+    options.onTick?.(run, 0);
+    return run;
+  }
+
+  while (Date.now() - startedAt < timeoutMs) {
+    options.onTick?.(run, Date.now() - startedAt);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, intervalMs);
+      options.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('Aborted'));
+      }, { once: true });
+    });
+    run = await read();
+    if (CANVAS_TERMINAL_STATUSES.has(run.status)) {
+      options.onTick?.(run, Date.now() - startedAt);
+      return run;
+    }
+  }
+
+  throw new CliError(
+    `Run ${runId} did not complete within ${Math.round(timeoutMs / 1000)}s. The run may still finish later — check with \`genfire workflow run-status ${workflowId} ${runId}\`.`,
     'wait_timeout'
   );
 }

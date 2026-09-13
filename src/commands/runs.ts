@@ -26,6 +26,8 @@ export function registerRunsCommand(program: Command): void {
     .option('--since <date>', 'Only runs created on/after this ISO date, e.g. 2026-03-01')
     .option('--until <date>', 'Only runs created on/before this ISO date')
     .option('--cursor <cursor>', 'Continue from a previous page (its next_cursor)')
+    .option('--team <teamId>', 'Only runs billed to this workspace pool — what the team has made')
+    .option('--project <projectId>', 'Only runs filed into this project — what is in this folder')
     .option('-l, --limit <n>', 'Max runs to return', '25')
     .action(async (opts: {
       search?: string;
@@ -34,6 +36,8 @@ export function registerRunsCommand(program: Command): void {
       since?: string;
       until?: string;
       cursor?: string;
+      team?: string;
+      project?: string;
       limit: string;
     }) => {
       const client = await createClient();
@@ -58,8 +62,12 @@ export function registerRunsCommand(program: Command): void {
         q: opts.search,
         starting_after: opts.cursor,
         created_after: opts.since,
-        created_before: opts.until
-      });
+        created_before: opts.until,
+        // Not on the pinned SDK's ListRunsParams yet — see the scopeFields note
+        // in commands/generate.ts. The API filters on both today.
+        ...(opts.team ? { team_id: opts.team } : {}),
+        ...(opts.project ? { project_id: opts.project } : {})
+      } as any);
 
       printResult(response, () => {
         if (response.data.length === 0) {
