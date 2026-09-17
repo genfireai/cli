@@ -1,10 +1,15 @@
+import { readFile } from 'node:fs/promises';
+import { publicApiRequest } from '../client.js';
 import { Command } from 'commander';
 import { createClient } from '../client.js';
-import { bold, cyan, dim, printResult, yellow } from '../output.js';
+import { bold, cyan, dim, printJson, printResult, yellow } from '../output.js';
 import type { EstimateCostRequest } from '@genfire/sdk';
 
 export function registerCostCommand(program: Command): void {
   const cost = program.command('cost').description('Estimate the EXACT credit cost of a generation before running it');
+
+  cost.command('request <file>').description('Estimate a complete generation request, including references, templates and task routing')
+    .action(async(file:string)=>printJson(await publicApiRequest('POST','/models/estimate-cost',{body:JSON.parse(await readFile(file,'utf8'))})));
 
   cost
     .command('image <prompt>')

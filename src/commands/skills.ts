@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { Skill } from '@genfire/sdk';
-import { createClient } from '../client.js';
+import { publicApiRequest, createClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, green, printResult, printTable, yellow } from '../output.js';
 
@@ -158,6 +158,14 @@ export function registerSkillsCommand(program: Command): void {
         process.stdout.write(`${green('✓')} Installed ${bold(skill.title)}\n`);
         printSkill(skill);
       });
+    });
+
+  skills
+    .command('read <skillId> [path]')
+    .description('Read one accessible skill, or a named reference file')
+    .action(async (skillId: string, path?: string) => {
+      const result = await publicApiRequest<any>('GET', `/skills/${encodeURIComponent(skillId)}${path ? '?file=' + encodeURIComponent(path) : ''}`);
+      printResult(result, () => process.stdout.write(`${result.content || ''}\n`));
     });
 
   skills

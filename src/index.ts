@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { registerRuntimeCommands } from './commands/runtime.js';
 import { Command } from 'commander';
 import { GenFireApiError } from '@genfire/sdk';
 import { CliError } from './errors.js';
@@ -12,6 +13,7 @@ import { registerGenerateCommands } from './commands/generate.js';
 import { registerBatchCommands } from './commands/batch.js';
 import { registerRunsCommand } from './commands/runs.js';
 import { registerCostCommand } from './commands/cost.js';
+import { registerMediaCommands } from './commands/media.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerTimelineCommands } from './commands/timeline.js';
 import { registerPresetCommands } from './commands/presets.js';
@@ -60,6 +62,8 @@ async function main(): Promise<void> {
   registerBatchCommands(program);
   registerRunsCommand(program);
   registerCostCommand(program);
+  registerMediaCommands(program);
+  registerRuntimeCommands(program);
   registerWorkflowCommands(program);
   registerTimelineCommands(program);
   registerPresetCommands(program);

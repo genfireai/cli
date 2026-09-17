@@ -242,6 +242,21 @@ export function registerTimelineCommands(program: Command): void {
       printTimeline(found);
     });
 
+  timeline
+    .command('patch <timelineId>')
+    .description('Apply targeted edits by clip, source or layer id; preserve all unnamed content')
+    .requiredOption('-f, --file <path>', 'JSON operations array, or { operations: [...] }')
+    .requiredOption('-r, --rev <n>', 'The revision you inspected before editing')
+    .action(async (timelineId: string, opts: { file: string; rev: string }) => {
+      const rev = Number(opts.rev);
+      if (!Number.isInteger(rev) || rev < 1) throw new CliError('--rev must be a positive integer', 'invalid_rev');
+      const raw = JSON.parse(await readFile(opts.file, 'utf8'));
+      const operations = Array.isArray(raw) ? raw : raw.operations;
+      if (!Array.isArray(operations) || !operations.length || operations.length > 100) throw new CliError('Supply 1–100 operations', 'invalid_operations');
+      const updated = await publicApiRequest<Timeline>('PATCH', `/videos/timelines/${encodeURIComponent(timelineId)}`, { body: { rev, operations } });
+      printTimeline(updated);
+    });
+
   // ---- update ----
   timeline
     .command('update <timelineId>')

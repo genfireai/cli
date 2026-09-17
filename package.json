@@ -40,7 +40,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@genfire/sdk": "^0.23.0",
+    "@genfire/sdk": "^0.24.0",
     "commander": "^12.1.0",
     "ink": "^7.0.2",
     "ink-big-text": "^2.0.0",

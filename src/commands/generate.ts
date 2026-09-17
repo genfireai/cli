@@ -491,7 +491,7 @@ export function registerGenerateCommands(program: Command): void {
       .command('music [prompt]')
       .description('Generate music from a prompt, or from a composition plan via --plan-file')
   , { fileable: true })
-    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.lyria3_pro | music.minimax_music_3)')
+    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.elevenlabs_music_v2_5 | music.lyria3_pro | music.minimax_music_3)')
     .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria 3 Pro ignores it')
     .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
     .option('--seed <n>', 'Random seed for more consistent results (with --plan-file only)')
