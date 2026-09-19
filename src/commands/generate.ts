@@ -587,9 +587,12 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('lipsync')
-      .description('Lip-sync a video to an audio track')
+      .description('Lip-sync a video — or animate a photo (--image) — to an audio track')
   , { fileable: true })
-    .requiredOption('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
+    .option('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
+    .option('--image <urlOrPath>', 'Photo to animate instead of a video (uses lipsync.h3_max_lipsync; audio must be 5–14.8s)')
+    .option('--resolution <resolution>', 'With --image: 480P, 768P (default), 1080P or 2K')
+    .option('--transcription', 'With --image: transcribe the audio to guide the mouth shapes')
     .requiredOption('--audio <urlOrPath>', 'Source audio URL or local path (auto-uploaded)')
     .option('-m, --model <model>', 'Lipsync model alias')
     .option('--sync-mode <mode>', 'Sync mode: cut_off, loop, bounce, silence, remap')
@@ -597,11 +600,24 @@ export function registerGenerateCommands(program: Command): void {
     .option('--description <description>', 'Optional description')
     .option('-d, --duration <seconds>', 'Duration override')
     .action(async (opts: CommonGenerateOptions & {
-      video: string; audio: string; model?: string;
+      video?: string; image?: string; resolution?: string; transcription?: boolean;
+      audio: string; model?: string;
       syncMode?: string; title?: string; description?: string; duration?: string;
     }) => {
+      if (Boolean(opts.video) === Boolean(opts.image)) {
+        throw new CliError('Pass exactly one of --video or --image.', 'invalid_lipsync_source');
+      }
+      const validResolutions = new Set(['480P', '768P', '1080P', '2K']);
+      const resolution = opts.resolution?.toUpperCase();
+      if (resolution && (!opts.image || !validResolutions.has(resolution))) {
+        throw new CliError(
+          opts.image ? `Invalid --resolution: ${opts.resolution}` : '--resolution only applies with --image.',
+          'invalid_resolution'
+        );
+      }
       const client = await createClient();
-      const videoUrl = (await resolveMediaInput(client, opts.video)).url;
+      const videoUrl = opts.video ? (await resolveMediaInput(client, opts.video)).url : undefined;
+      const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
       const audioUrl = (await resolveMediaInput(client, opts.audio)).url;
       const validSyncModes = new Set(['cut_off', 'loop', 'bounce', 'silence', 'remap']);
       if (opts.syncMode && !validSyncModes.has(opts.syncMode)) {
@@ -610,8 +626,12 @@ export function registerGenerateCommands(program: Command): void {
       const run = await client.createLipsyncGeneration(
         {
           video_url: videoUrl,
+          image_url: imageUrl,
+          resolution,
+          enable_transcription: opts.transcription || undefined,
           audio_url: audioUrl,
-          model: opts.model,
+          // A photo only has one engine; a video keeps the API default.
+          model: opts.model ?? (imageUrl ? 'lipsync.h3_max_lipsync' : undefined),
           sync_mode: opts.syncMode as ('cut_off' | 'loop' | 'bounce' | 'silence' | 'remap') | undefined,
           title: opts.title,
           description: opts.description,

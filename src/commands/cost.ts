@@ -105,11 +105,13 @@ export function registerCostCommand(program: Command): void {
     .requiredOption('-m, --model <model>', 'Public lipsync model alias')
     .option('-d, --duration <seconds>', 'Audio duration in seconds')
     .option('--audio-url <url>', 'Audio URL (used to estimate duration when --duration is omitted)')
-    .action(async (opts: { model: string; duration?: string; audioUrl?: string }) => {
+    .option('--resolution <resolution>', 'lipsync.h3_max_lipsync only: 480P, 768P, 1080P or 2K')
+    .action(async (opts: { model: string; duration?: string; audioUrl?: string; resolution?: string }) => {
       await runEstimate({
         model: opts.model,
         duration: opts.duration ? Number(opts.duration) : undefined,
-        audio_url: opts.audioUrl
+        audio_url: opts.audioUrl,
+        resolution: opts.resolution
       });
     });
 }
