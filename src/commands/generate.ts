@@ -491,15 +491,15 @@ export function registerGenerateCommands(program: Command): void {
       .command('music [prompt]')
       .description('Generate music from a prompt, or from a composition plan via --plan-file')
   , { fileable: true })
-    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.elevenlabs_music_v2_5 | music.lyria3_pro | music.minimax_music_3)')
-    .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria 3 Pro ignores it')
+    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.elevenlabs_music_v2_5 | music.lyria_3_5 | music.lyria3_pro | music.minimax_music_3)')
+    .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria (3.5 / 3 Pro) ignores it — steer length in the prompt')
     .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
     .option('--seed <n>', 'Random seed for more consistent results (with --plan-file only)')
     .option('--flex-sections', 'Let music_v1 flex section durations of a --plan-file for quality (durations are strict by default)')
     .option('--format <format>', 'Output format')
     .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs prompt mode only)')
-    .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3 Pro only)')
-    .option('--negative-prompt <text>', 'What to exclude from the audio (Lyria 3 Pro only)')
+    .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3.5 / 3 Pro only)')
+    .option('--negative-prompt <text>', 'Deprecated — no music model supports negative prompting; ignored')
     .option('--lyrics <text>', 'Lyrics to sing — REQUIRED for music.minimax_music_3. Each structure tag ([verse], [chorus], ...) on its own line')
     .option('--lyrics-file <path>', 'Read the lyrics from a text file instead of --lyrics')
     .option('--steps <n>', 'Flow-matching steps per 8s chunk, 1-100 (MiniMax Music 3 only)')
@@ -526,7 +526,7 @@ export function registerGenerateCommands(program: Command): void {
       // fail here rather than after a round-trip to the API.
       if (opts.model === 'music.minimax_music_3' && !lyrics?.trim()) {
         throw new CliError(
-          'music.minimax_music_3 requires lyrics — pass --lyrics or --lyrics-file. Use music.lyria3_pro to have the model write the words.',
+          'music.minimax_music_3 requires lyrics — pass --lyrics or --lyrics-file. Use music.lyria_3_5 to have the model write the words.',
           'missing_lyrics'
         );
       }
