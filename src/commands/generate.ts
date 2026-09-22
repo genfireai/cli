@@ -46,6 +46,21 @@ function scopeFields(opts: CommonGenerateOptions): Record<string, string> {
   };
 }
 
+// H3 Max Styles — `generate video --style / --damage-level`. Mirrored from the
+// backend seam, which this package cannot import
+// (backend/src/lib/models/h3MaxStyles.ts: H3_MAX_STYLE_IDS /
+// H3_MAX_DAMAGE_LEVELS / H3_MAX_STYLES_PUBLIC_ALIAS) — change them together.
+// The API stays the validator of record; these only fail a typo early.
+const H3_MAX_STYLES_ALIAS = 'video.hailuo_03_max_styles';
+const H3_MAX_STYLE_IDS = ['vhs', 'retro_toon_70s', 'low_poly', 'hand_drawn', '16bit_pixel'] as const;
+const H3_MAX_DAMAGE_LEVELS = ['light', 'medium', 'heavy'] as const;
+
+/** `Low Poly`, `low-poly`, `retro-toon-70s` → the canonical id, or undefined. */
+function normalizeCliVideoStyle(value: string): (typeof H3_MAX_STYLE_IDS)[number] | undefined {
+  const id = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return (H3_MAX_STYLE_IDS as readonly string[]).includes(id) ? (id as (typeof H3_MAX_STYLE_IDS)[number]) : undefined;
+}
+
 /**
  * Read + parse an ElevenLabs music composition plan from a JSON file (the
  * `--plan-file` flag on `generate music`). The file must contain the plan
@@ -261,10 +276,27 @@ export function registerGenerateCommands(program: Command): void {
     .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
     .option('--task <task>', 'GENFIRE GEDI, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire gedi presets')
+    .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
+    .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
     .action(async (prompt: string, opts: CommonGenerateOptions & {
       model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string; bitrate?: string; task?: string;
       refImage?: string[]; refVideo?: string[]; refVideoTrim?: string[]; refAudio?: string[];
+      style?: string; damageLevel?: string;
     }) => {
+      // H3 Max Styles. Checked before anything is uploaded, so a typo'd look
+      // costs a message rather than an upload and a round trip.
+      const videoStyle = opts.style !== undefined ? normalizeCliVideoStyle(opts.style) : undefined;
+      if (opts.style !== undefined && !videoStyle) {
+        throw new CliError(`--style must be one of: ${H3_MAX_STYLE_IDS.join(', ')} (got "${opts.style}").`, 'invalid_video_style');
+      }
+      const damageLevel = opts.damageLevel?.trim().toLowerCase();
+      if (damageLevel !== undefined && !(H3_MAX_DAMAGE_LEVELS as readonly string[]).includes(damageLevel)) {
+        throw new CliError(`--damage-level must be one of: ${H3_MAX_DAMAGE_LEVELS.join(', ')}.`, 'invalid_damage_level');
+      }
+      if (damageLevel !== undefined && videoStyle !== 'vhs') {
+        throw new CliError('--damage-level is the VHS tape wear — pass it with --style vhs.', 'unsupported_damage_level');
+      }
+
       const client = await createClient();
       // Local paths are uploaded first — the API only takes URLs.
       const resolveAll = async (entries?: string[]) =>
@@ -336,7 +368,8 @@ export function registerGenerateCommands(program: Command): void {
       const run = await client.createVideoGeneration(
         {
           prompt,
-          model: opts.model,
+          // A style only has one engine; everything else keeps the API default.
+          model: opts.model ?? (videoStyle ? H3_MAX_STYLES_ALIAS : undefined),
           aspect_ratio: opts.aspectRatio,
           duration: opts.duration ? Number(opts.duration) : undefined,
           resolution: opts.resolution,
@@ -353,6 +386,10 @@ export function registerGenerateCommands(program: Command): void {
           // Typed in @genfire/sdk from the release that adds `task`; the API
           // accepts it today, so pass it through ahead of the type bump.
           ...(task ? ({ task } as Record<string, unknown>) : {}),
+          // Typed in @genfire/sdk from the release that adds video_style; the
+          // API accepts both today, so pass them through ahead of the type bump.
+          ...(videoStyle ? ({ video_style: videoStyle } as Record<string, unknown>) : {}),
+          ...(damageLevel ? ({ damage_level: damageLevel } as Record<string, unknown>) : {}),
           ...scopeFields(opts)
         } as any,
         { idempotencyKey: randomUUID() }
