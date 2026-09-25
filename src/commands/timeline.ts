@@ -41,6 +41,34 @@ interface TimelineClip {
   layout?: { x: number; y: number; scale: number; rotation?: number };
   textContent?: string;
   textStyle?: Record<string, unknown>;
+  /** video/audio playback rate, 0.25-4. `duration` stays timeline seconds. */
+  speed?: number;
+  /** Keyframed zoom/pan over `layout`; `t` is seconds from the clip's start. */
+  motion?: TimelineClipMotion;
+}
+
+/** The eases a motion keyframe may name — the graphics track's set. */
+type GraphicsEase =
+  | 'linear' | 'power1.in' | 'power1.out' | 'power1.inOut'
+  | 'power2.in' | 'power2.out' | 'power2.inOut' | 'back.out' | 'expo.out';
+
+interface TimelineClipMotion {
+  /** `scale` multiplies layout.scale; `x`/`y` (frame %) add to layout.x/y; `ease` shapes the segment arriving. */
+  keyframes: Array<{ t: number; scale: number; x?: number; y?: number; ease?: GraphicsEase }>;
+  /** 0-1. */
+  motionBlur?: number;
+}
+
+const FINISH_PRESETS = ['none', 'dvd_35mm', 'camcorder', 'flash_editorial'] as const;
+type FinishPreset = (typeof FINISH_PRESETS)[number];
+
+/** A look graded over the whole finished film. */
+interface TimelineFinish {
+  preset: FinishPreset;
+  /** 0-1, default 1. */
+  intensity: number;
+  /** 0-1, default 0.5. */
+  grain: number;
 }
 
 interface TimelineGraphics {
@@ -58,6 +86,7 @@ interface TimelineManifest {
   clips: TimelineClip[];
   sources: Array<{ id: string; kind: string; ref: string; url: string; measured?: Record<string, unknown> }>;
   graphics?: TimelineGraphics;
+  finish?: TimelineFinish;
 }
 
 interface Timeline {
@@ -162,6 +191,38 @@ async function readGraphicsFile(path: string): Promise<TimelineGraphics> {
   );
 }
 
+/**
+ * `--finish dvd_35mm [--finish-intensity 0.8] [--finish-grain 0.3]` → the
+ * manifest's `finish` block. Checked here so a typo costs no round trip; the
+ * API 400s an unknown preset anyway.
+ */
+function finishFromFlags(opts: { finish?: string; finishIntensity?: string; finishGrain?: string }): Partial<TimelineFinish> | undefined {
+  if (opts.finish === undefined) {
+    if (opts.finishIntensity !== undefined || opts.finishGrain !== undefined) {
+      throw new CliError('--finish-intensity and --finish-grain need --finish <preset>.', 'invalid_finish');
+    }
+    return undefined;
+  }
+  if (!(FINISH_PRESETS as readonly string[]).includes(opts.finish)) {
+    throw new CliError(`--finish must be one of: ${FINISH_PRESETS.join(', ')}`, 'invalid_finish');
+  }
+  const unit = (value: string | undefined, flag: string): number | undefined => {
+    if (value === undefined) return undefined;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > 1) throw new CliError(`${flag} must be a number from 0 to 1`, 'invalid_finish');
+    return n;
+  };
+  const intensity = unit(opts.finishIntensity, '--finish-intensity');
+  const grain = unit(opts.finishGrain, '--finish-grain');
+  return {
+    preset: opts.finish as FinishPreset,
+    ...(intensity !== undefined ? { intensity } : {}),
+    ...(grain !== undefined ? { grain } : {})
+  };
+}
+
+const FINISH_FLAG_HELP = `Grade the whole film: ${FINISH_PRESETS.join(' | ')}. Wins over any \`finish\` in --file.`;
+
 function printTimeline(timeline: Timeline): void {
   printResult(timeline, () => {
     process.stdout.write(`${bold(timeline.id)} ${dim(`rev ${timeline.rev}`)}\n`);
@@ -175,6 +236,11 @@ function printTimeline(timeline: Timeline): void {
       process.stdout.write(
         `${dim('Graphics:')} ${m.graphics.layers.length} layers  ` +
         `${dim(`v${m.version}${m.graphics.aboveCaptions ? ', above captions' : ''}`)}\n`
+      );
+    }
+    if (m.finish && m.finish.preset !== 'none') {
+      process.stdout.write(
+        `${dim('Finish:')}   ${m.finish.preset}  ${dim(`intensity ${m.finish.intensity}, grain ${m.finish.grain}`)}\n`
       );
     }
     if (timeline.project_id) process.stdout.write(`${dim('Project:')}  ${timeline.project_id}\n`);
@@ -204,22 +270,30 @@ export function registerTimelineCommands(program: Command): void {
     .description('Store a manifest as a new timeline (free). Sources are probed up front, so a bad one fails here, not mid-render.')
     .requiredOption(
       '-f, --file <pathOrDash>',
-      'JSON manifest: { duration, width, height, fps?, clips[], sources[], graphics? }. Use - to read stdin.'
+      'JSON manifest: { duration, width, height, fps?, clips[], sources[], graphics?, finish? }. Use - to read stdin.'
     )
     .option(
       '-g, --graphics <pathOrDash>',
       'Keyframed OVERLAY layers as their own JSON file — { "layers": [...] } or a bare array. Stores the manifest at version 2. Wins over any `graphics` already in --file. Use - for stdin.'
     )
+    .option('--finish <preset>', FINISH_FLAG_HELP)
+    .option('--finish-intensity <n>', 'Finish strength, 0-1 (default 1)')
+    .option('--finish-grain <n>', 'Film grain, 0-1 (default 0.5)')
     .option('-t, --title <title>', 'Name this edit in your library')
     .option('--team <teamId>', 'Bill later renders to a workspace credit pool')
     .option('--project <projectId>', 'File renders of this timeline into a project')
-    .action(async (opts: { file: string; graphics?: string; title?: string; team?: string; project?: string }) => {
+    .action(async (opts: {
+      file: string; graphics?: string; title?: string; team?: string; project?: string;
+      finish?: string; finishIntensity?: string; finishGrain?: string;
+    }) => {
+      const finish = finishFromFlags(opts);
       const manifest = await readManifestFile(opts.file);
       const graphics = opts.graphics ? await readGraphicsFile(opts.graphics) : undefined;
       const created = await publicApiRequest<Timeline>('POST', '/videos/timelines', {
         body: {
           ...manifest,
           ...(graphics ? { graphics } : {}),
+          ...(finish ? { finish } : {}),
           ...(opts.title ? { title: opts.title } : {}),
           ...(opts.team ? { team_id: opts.team } : {}),
           ...(opts.project ? { project_id: opts.project } : {})
@@ -244,7 +318,7 @@ export function registerTimelineCommands(program: Command): void {
 
   timeline
     .command('patch <timelineId>')
-    .description('Apply targeted edits by clip, source or layer id; preserve all unnamed content')
+    .description('Apply targeted edits by clip, source or layer id, plus `frame` and `finish` ops; preserve all unnamed content')
     .requiredOption('-f, --file <path>', 'JSON operations array, or { operations: [...] }')
     .requiredOption('-r, --rev <n>', 'The revision you inspected before editing')
     .action(async (timelineId: string, opts: { file: string; rev: string }) => {
@@ -270,8 +344,15 @@ export function registerTimelineCommands(program: Command): void {
       '-g, --graphics <pathOrDash>',
       'Replace the overlay layers from their own JSON file. Wins over any `graphics` in --file. NOTE: this is a whole-manifest replace, so a manifest carrying no graphics and no --graphics DELETES the overlay and returns the timeline to version 1.'
     )
+    .option('--finish <preset>', `${FINISH_FLAG_HELP} Omitting it (and \`finish\` in --file) removes the look.`)
+    .option('--finish-intensity <n>', 'Finish strength, 0-1 (default 1)')
+    .option('--finish-grain <n>', 'Film grain, 0-1 (default 0.5)')
     .option('-t, --title <title>', 'Rename the edit')
-    .action(async (timelineId: string, opts: { file: string; graphics?: string; rev?: string; title?: string }) => {
+    .action(async (timelineId: string, opts: {
+      file: string; graphics?: string; rev?: string; title?: string;
+      finish?: string; finishIntensity?: string; finishGrain?: string;
+    }) => {
+      const finish = finishFromFlags(opts);
       const manifest = await readManifestFile(opts.file);
       const graphics = opts.graphics ? await readGraphicsFile(opts.graphics) : undefined;
       let rev: number;
@@ -294,6 +375,7 @@ export function registerTimelineCommands(program: Command): void {
           body: {
             ...manifest,
             ...(graphics ? { graphics } : {}),
+            ...(finish ? { finish } : {}),
             rev,
             ...(opts.title ? { title: opts.title } : {})
           }
@@ -413,6 +495,7 @@ export function registerTimelineCommands(program: Command): void {
     `  genfire timeline render tl_… ${cyan('# 480p proxy, cached')}\n` +
     `  genfire timeline get tl_… --manifest > edit.json ${cyan('# edit, then:')}\n` +
     `  genfire timeline update tl_… -f edit.json\n` +
+    `  genfire timeline update tl_… -f edit.json --finish dvd_35mm ${cyan('# grade the whole film')}\n` +
     `  genfire timeline render tl_… --final\n`
   );
 }
