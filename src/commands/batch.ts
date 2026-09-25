@@ -296,6 +296,34 @@ export function registerBatchCommands(program: Command): void {
       });
     });
 
+  // ---- item ----
+  batch
+    .command('item <batchId> <itemId>')
+    .description('Show one batch item — its input, status, run id and output')
+    .option('-o, --output <path>', 'Download the item\'s output here once it has completed')
+    .action(async (batchId: string, itemId: string, opts: { output?: string }) => {
+      const client = await createClient();
+      // Not on the pinned SDK (0.23.0); GET /v1/batches/{id}/items/{itemId}.
+      const item = await publicApiRequest<BatchItem & { run_id?: string | null; custom_id?: string | null; attempt?: number }>(
+        'GET',
+        `/batches/${encodeURIComponent(batchId)}/items/${encodeURIComponent(itemId)}`
+      );
+      let downloaded: string[] | undefined;
+      if (opts.output && item.status === 'completed' && item.run_id) {
+        const run = await client.getRun(item.run_id);
+        const outputs = extractOutputUrls(run, run.capability);
+        if (outputs.length > 0) downloaded = await downloadOutputs(outputs, opts.output);
+      }
+      printResult(downloaded ? { ...item, downloaded_to: downloaded } : item, () => {
+        process.stdout.write(`${bold(item.id)} ${dim(`(${statusColor(item.status)})`)}\n`);
+        if (item.custom_id) process.stdout.write(`${dim('Custom id:')}  ${item.custom_id}\n`);
+        if (item.run_id) process.stdout.write(`${dim('Run:')}        ${item.run_id}  ${dim(`(genfire runs output ${item.run_id})`)}\n`);
+        if (item.attempt !== undefined) process.stdout.write(`${dim('Attempt:')}    ${item.attempt}\n`);
+        if (item.error) process.stdout.write(`${red('Error:')}      ${item.error.code}: ${item.error.message}\n`);
+        for (const path of downloaded ?? []) process.stdout.write(`${dim('Saved:')} ${path}\n`);
+      });
+    });
+
   // ---- get ----
   batch
     .command('get <batchId>')

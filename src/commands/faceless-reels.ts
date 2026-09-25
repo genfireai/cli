@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
-import { createClient } from '../client.js';
-import { dim, printResult, printTable } from '../output.js';
+import { readFile } from 'node:fs/promises';
+import { createClient, publicApiRequest } from '../client.js';
+import { CliError } from '../errors.js';
+import { cyan, dim, printResult, printTable } from '../output.js';
 
 export function registerFacelessReelsCommand(program: Command): void {
   const reels = program
@@ -270,4 +272,152 @@ export function registerFacelessReelsCommand(program: Command): void {
         process.stderr.write(`${dim('Poll it with:')} genfire runs get ${run.id}\n`);
       });
     });
+
+  // ── Channel episodes (/subscriptions/{id}/episodes) ─────────────────────────
+  // One episode of a channel with per-episode overrides, its free quote, and
+  // the channel's back catalogue. The MCP twin is genfire_create_channel_episode.
+
+  const withEpisodeOptions = (cmd: Command): Command => cmd
+    .option('--aspect-ratio <ar>', '16:9 | 9:16 (defaults to the channel)')
+    .option('--motion <style>', 'seamless | scenes | stills')
+    .option('--engine <engine>', 'reel | explainer (defaults to the channel format)')
+    .option('-d, --duration <seconds>', 'Target length in seconds')
+    .option('-s, --style <id>', 'Visual style id override')
+    .option('--voice-id <id>', 'TTS voice id override')
+    .option('--custom-script-file <path>', 'Plain-text file narrated verbatim')
+    .option('--script-file <path>', 'JSON structured script ({ cast?, beats: [...] }) — authors every beat yourself')
+    .option('--style-prompt <text>', 'Custom visual style prompt')
+    .option('--style-anchor <url>', 'Image URL the visual style is anchored to')
+    .option('--captions <on|off>', 'Burn in captions or not')
+    .option('--fast', 'Fast mode (cheaper, quicker, fewer animated scenes)')
+    .option('--no-fast', 'Force full-quality mode')
+    .option(
+      '--ref <url[|label]>',
+      'Reference image URL with an optional |label (repeat for several)',
+      (value: string, previous: string[]) => previous.concat([value]),
+      [] as string[]
+    );
+
+  type EpisodeOpts = {
+    aspectRatio?: string; motion?: string; engine?: string; duration?: string; style?: string; voiceId?: string;
+    customScriptFile?: string; scriptFile?: string; stylePrompt?: string; styleAnchor?: string; captions?: string;
+    fast?: boolean; ref?: string[];
+  };
+
+  const episodeBody = async (topic: string | undefined, opts: EpisodeOpts): Promise<Record<string, unknown>> => {
+    const readText = async (path: string, flag: string) => {
+      try {
+        return await readFile(path, 'utf8');
+      } catch (err) {
+        throw new CliError(`Could not read ${flag} ${path}: ${(err as Error).message}`, 'invalid_file');
+      }
+    };
+    let script: unknown;
+    if (opts.scriptFile) {
+      try {
+        script = JSON.parse(await readText(opts.scriptFile, '--script-file'));
+      } catch (err) {
+        if (err instanceof CliError) throw err;
+        throw new CliError(`--script-file is not valid JSON: ${(err as Error).message}`, 'invalid_script_file');
+      }
+    }
+    if (opts.captions !== undefined && opts.captions !== 'on' && opts.captions !== 'off') {
+      throw new CliError('--captions must be on or off', 'invalid_option');
+    }
+    const duration = opts.duration === undefined ? undefined : Number(opts.duration);
+    if (duration !== undefined && !Number.isFinite(duration)) {
+      throw new CliError('--duration must be a number of seconds', 'invalid_duration');
+    }
+    const refs = (opts.ref ?? []).map((entry) => {
+      const pipe = entry.indexOf('|');
+      if (pipe === -1) return { url: entry.trim() };
+      const label = entry.slice(pipe + 1).trim();
+      return { url: entry.slice(0, pipe).trim(), ...(label ? { label } : {}) };
+    });
+    return {
+      ...(topic ? { topic } : {}),
+      ...(opts.aspectRatio ? { aspect_ratio: opts.aspectRatio } : {}),
+      ...(opts.motion ? { motion_style: opts.motion } : {}),
+      ...(opts.engine ? { engine: opts.engine } : {}),
+      ...(duration !== undefined ? { target_duration_sec: duration } : {}),
+      ...(opts.style ? { style_id: opts.style } : {}),
+      ...(opts.voiceId ? { voice_id: opts.voiceId } : {}),
+      ...(opts.customScriptFile ? { custom_script: await readText(opts.customScriptFile, '--custom-script-file') } : {}),
+      ...(script !== undefined ? { script } : {}),
+      ...(opts.stylePrompt ? { custom_style_prompt: opts.stylePrompt } : {}),
+      ...(opts.styleAnchor ? { style_anchor_url: opts.styleAnchor } : {}),
+      ...(opts.captions ? { captions_on: opts.captions === 'on' } : {}),
+      ...(opts.fast !== undefined ? { fast_mode: opts.fast } : {}),
+      ...(refs.length ? { reference_images: refs } : {})
+    };
+  };
+
+  subs
+    .command('episodes <id>')
+    .description("List a channel's episodes, newest first")
+    .option('-l, --limit <n>', 'Max episodes, 1-100', '30')
+    .action(async (id: string, opts: { limit: string }) => {
+      const limit = Number(opts.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        throw new CliError('--limit must be an integer 1-100', 'invalid_limit');
+      }
+      const response = await publicApiRequest<{ object: 'list'; data: Array<Record<string, any>> }>(
+        'GET',
+        `/faceless-reels/subscriptions/${encodeURIComponent(id)}/episodes?limit=${limit}`
+      );
+      printResult(response, () => {
+        if (!response.data?.length) {
+          process.stdout.write(`${dim('No episodes yet. Make one: genfire faceless-reels subscriptions add-episode ' + id + ' "<topic>"')}\n`);
+          return;
+        }
+        printTable(
+          response.data.map((e) => ({
+            id: e.id,
+            topic: String(e.topic ?? '').slice(0, 40),
+            status: e.status ?? '',
+            kind: e.kind ?? '',
+            aspect: e.aspect_ratio ?? '',
+            created: e.created_at ? String(e.created_at).replace('T', ' ').slice(0, 16) : ''
+          })),
+          ['id', 'topic', 'status', 'kind', 'aspect', 'created']
+        );
+      });
+    });
+
+  withEpisodeOptions(
+    subs
+      .command('estimate-episode <id> [topic]')
+      .description('Plan and price one episode of a channel. Free — nothing is billed')
+  ).action(async (id: string, topic: string | undefined, opts: EpisodeOpts) => {
+    const result = await publicApiRequest<Record<string, any>>(
+      'POST',
+      `/faceless-reels/subscriptions/${encodeURIComponent(id)}/estimate-episode`,
+      { body: await episodeBody(topic, opts) }
+    );
+    printResult(result, () => {
+      const credits = result.estimate?.total ?? result.estimate?.credits ?? result.credits;
+      process.stdout.write(`${dim('Estimate:')} ${cyan(String(credits ?? '?'))} credits\n`);
+      if (result.plan?.engine) process.stdout.write(`${dim('Engine:')}   ${result.plan.engine}\n`);
+      if (result.plan?.target_duration_sec) process.stdout.write(`${dim('Length:')}   ${result.plan.target_duration_sec}s\n`);
+    });
+  });
+
+  withEpisodeOptions(
+    subs
+      .command('add-episode <id> <topic>')
+      .description('Produce ONE episode of a channel now, with per-episode overrides (bills credits; async run)')
+  ).action(async (id: string, topic: string, opts: EpisodeOpts) => {
+    if (topic.trim().length < 3) {
+      throw new CliError('topic must be at least 3 characters', 'invalid_episode_topic');
+    }
+    const run = await publicApiRequest<Record<string, any>>(
+      'POST',
+      `/faceless-reels/subscriptions/${encodeURIComponent(id)}/episodes`,
+      { body: await episodeBody(topic, opts), idempotencyKey: randomUUID() }
+    );
+    printResult(run, () => {
+      process.stderr.write(`${dim('Run queued:')} ${run.id} ${dim(`(${run.status})`)}\n`);
+      process.stderr.write(`${dim('Poll it with:')} genfire runs get ${run.id}\n`);
+    });
+  });
 }

@@ -174,6 +174,13 @@ export async function resolveMediaInput(client: GenFireClient, value: string): P
       throw new CliError(`Path is not a file: ${value}`, 'invalid_media_input');
     }
   } catch (err: any) {
+    // A completed run's id stands in for its output — the same run-id media
+    // reference the MCP tools accept, so `-i run_abc` chains one generation
+    // into the next without a download/re-upload. Checked only after the path
+    // lookup misses, so a local file that happens to be named run_x still wins.
+    if (err?.code === 'ENOENT' && RUN_ID_REF.test(value)) {
+      return { url: await resolveRunOutputUrl(client, value) };
+    }
     if (err?.code === 'ENOENT') {
       throw new CliError(
         `Media input is neither an http(s) URL nor an existing local file: ${value}`,
@@ -185,6 +192,26 @@ export async function resolveMediaInput(client: GenFireClient, value: string): P
 
   const upload = await client.uploadFile(value);
   return { url: upload.asset_url, uploaded: upload };
+}
+
+// Run ids come in more than one prefix (`run_…`, `dash_video_…`), so any
+// id-shaped value (no dot, no slash) that is not a file on disk is a run.
+const RUN_ID_REF = /^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_-]+$/;
+
+/** The primary output URL of a completed run, for `run_…` media references. */
+export async function resolveRunOutputUrl(client: GenFireClient, runId: string): Promise<string> {
+  const run = await client.getRun(runId);
+  if (run.status !== 'completed') {
+    throw new CliError(
+      `Run ${runId} is ${run.status}; only a completed run can be used as a media input.`,
+      'run_not_completed'
+    );
+  }
+  const [first] = extractOutputUrls(run, runId);
+  if (!first) {
+    throw new CliError(`Run ${runId} has no media output to use as an input.`, 'run_has_no_media');
+  }
+  return first.url;
 }
 
 interface OutputFile {

@@ -13,6 +13,18 @@ import {
 } from '../runHelpers.js';
 import { resolveMentionFromPrompt } from './influencers.js';
 import { readExplainerScriptFile } from './explainers.js';
+import {
+  addImageRequestOptions,
+  addVideoRequestOptions,
+  buildImageRequest,
+  buildVideoRequest,
+  validateImageFlags,
+  validateVideoFlags,
+  type ImageFlags,
+  type VideoFlags,
+  buildSpeechExtras,
+  type SpeechExtraFlags
+} from '../generationRequests.js';
 
 interface CommonGenerateOptions {
   output?: string;
@@ -44,21 +56,6 @@ function scopeFields(opts: CommonGenerateOptions): Record<string, string> {
     ...(opts.project ? { project_id: opts.project } : {}),
     ...(opts.quote ? { quote_token: opts.quote } : {})
   };
-}
-
-// H3 Max Styles — `generate video --style / --damage-level`. Mirrored from the
-// backend seam, which this package cannot import
-// (backend/src/lib/models/h3MaxStyles.ts: H3_MAX_STYLE_IDS /
-// H3_MAX_DAMAGE_LEVELS / H3_MAX_STYLES_PUBLIC_ALIAS) — change them together.
-// The API stays the validator of record; these only fail a typo early.
-const H3_MAX_STYLES_ALIAS = 'video.hailuo_03_max_styles';
-const H3_MAX_STYLE_IDS = ['vhs', 'retro_toon_70s', 'low_poly', 'hand_drawn', '16bit_pixel'] as const;
-const H3_MAX_DAMAGE_LEVELS = ['light', 'medium', 'heavy'] as const;
-
-/** `Low Poly`, `low-poly`, `retro-toon-70s` → the canonical id, or undefined. */
-function normalizeCliVideoStyle(value: string): (typeof H3_MAX_STYLE_IDS)[number] | undefined {
-  const id = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
-  return (H3_MAX_STYLE_IDS as readonly string[]).includes(id) ? (id as (typeof H3_MAX_STYLE_IDS)[number]) : undefined;
 }
 
 /**
@@ -99,6 +96,13 @@ async function readMusicPlanFile(path: string): Promise<Record<string, unknown>>
   return plan;
 }
 
+/** "a, b" → ["a","b"]; "all" stays a bare string (ElevenLabs takes either). */
+function listish(value: string | undefined): string | string[] | undefined {
+  if (!value) return undefined;
+  const parts = value.split(',').map((p) => p.trim()).filter(Boolean);
+  return parts.length === 1 ? parts[0] : parts;
+}
+
 function parseDurationSeconds(value: string, flag: string): number {
   const trimmed = value.trim();
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(ms|s|m)?$/i);
@@ -127,7 +131,7 @@ function commonOptions(cmd: Command, opts: { fileable?: boolean } = {}): Command
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '2s')
     .option('--team <teamId>', 'Bill this run to a workspace credit pool instead of your own balance')
-    .option('--quote <token>', 'A quote_token from `genfire cost estimate` — charges the price you were quoted');
+    .option('--quote <token>', 'A quote_token from `genfire cost <kind>` (same flags) — charges the price you were quoted');
   return opts.fileable
     ? withCommon.option('--project <projectId>', 'File the result into this project when it completes')
     : withCommon;
@@ -181,44 +185,22 @@ export function registerGenerateCommands(program: Command): void {
   const generate = program.command('generate').description('Generate media (image, video, lipsync, speech, music, sfx, faceless-reel, explainer)');
 
   // ---- image ----
-  commonOptions(
+  // Flags and body come from generationRequests.ts, shared with `genfire cost
+  // image` so a quote minted there is spendable here (see that module).
+  addImageRequestOptions(commonOptions(
     generate
       .command('image <prompt>')
-      .description('Generate one or more images from a prompt. Use @<handle> to reference a trained influencer.')
-  , { fileable: true })
-    .option('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2')
-    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, e.g. 1:1, 16:9')
-    .option('-n, --count <n>', 'Number of images (1-4)', '1')
-    .option(
-      '-i, --image <urlOrPath>',
-      'Reference image URL or local path (auto-uploaded). Repeat -i for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3).',
-      (value: string, previous: string[]) => previous.concat([value]),
-      [] as string[]
-    )
+      .description('Generate one or more images from a prompt. Use @<handle> for a trained influencer or a saved element (genfire elements list).')
+  , { fileable: true }))
     .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
-    .option('--quality <level>', 'Image quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium')
-    .option('--resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; nano-banana family edit only — supply --image or @<handle>)')
-    .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; count?: string; image?: string[]; influencer?: string;
-      quality?: string; resolution?: string;
-    }) => {
+    .action(async (prompt: string, opts: CommonGenerateOptions & ImageFlags & { influencer?: string }) => {
+      // Shape checks before anything is uploaded or resolved.
+      validateImageFlags(opts);
       const client = await createClient();
-      const count = Number(opts.count);
-      if (!Number.isInteger(count) || count < 1 || count > 4) {
-        throw new CliError('--count must be an integer 1-4', 'invalid_count');
-      }
-      const imageInputs = opts.image ?? [];
-      if (imageInputs.length > 14) {
-        throw new CliError('At most 14 -i/--image inputs are allowed for a multi-image edit', 'too_many_images');
-      }
-      const resolvedImageUrls: string[] = [];
-      for (const input of imageInputs) {
-        resolvedImageUrls.push((await resolveMediaInput(client, input)).url);
-      }
-      const imageUrl = resolvedImageUrls.length === 1 ? resolvedImageUrls[0] : undefined;
-      const imageUrls = resolvedImageUrls.length > 1 ? resolvedImageUrls : undefined;
 
-      // Resolve mention: explicit --influencer wins; otherwise scan prompt for @<handle>.
+      // Influencer: explicit --influencer wins; otherwise the first @handle in
+      // the prompt that names one of your influencers. @element handles are
+      // left in the prompt — the API resolves those itself.
       let mentions: Array<{ handle: string; influencer_id: string }> | undefined;
       if (opts.influencer) {
         const explicit = await client.getInfluencer(opts.influencer);
@@ -228,170 +210,28 @@ export function registerGenerateCommands(program: Command): void {
         if (fromPrompt) mentions = [fromPrompt];
       }
 
-      const VALID_QUALITIES = new Set(['low', 'medium', 'high', 'auto']);
-      const VALID_RESOLUTIONS = new Set(['1K', '2K', '4K']);
-
-      if (opts.quality && !VALID_QUALITIES.has(opts.quality)) {
-        throw new CliError('--quality must be one of: low, medium, high, auto', 'invalid_quality');
-      }
-      if (opts.resolution && !VALID_RESOLUTIONS.has(opts.resolution)) {
-        throw new CliError('--resolution must be one of: 1K, 2K, 4K', 'invalid_resolution');
-      }
-
+      const body = await buildImageRequest(opts, async (input) => (await resolveMediaInput(client, input)).url);
       const run = await client.createImageGeneration(
-        {
-          prompt,
-          model: opts.model,
-          aspect_ratio: opts.aspectRatio,
-          count,
-          image_url: imageUrl,
-          image_urls: imageUrls,
-          mentions,
-          quality: opts.quality as 'low' | 'medium' | 'high' | 'auto' | undefined,
-          resolution: opts.resolution as '1K' | '2K' | '4K' | undefined,
-          ...scopeFields(opts)
-        } as any,
+        { prompt, ...body, mentions, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'image', opts);
     });
 
   // ---- video ----
-  commonOptions(
+  // Same arrangement as image: flags + body shared with `genfire cost video`.
+  addVideoRequestOptions(commonOptions(
     generate
       .command('video <prompt>')
-      .description('Generate a video from a prompt (and optional reference image)')
-  , { fileable: true })
-    .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1')
-    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1)')
-    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent)')
-    .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
-    .option('-i, --image <urlOrPath>', 'Reference image URL or local path (auto-uploaded)')
-    .option('--end-image <urlOrPath>', 'Last frame the clip lands on — URL or local path, paired with --image. Supported where capabilities.endFrame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
-    .option('--ref-image <urlOrPath...>', 'Reference image URL(s) or local paths — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5')
-    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 1.8-30.2s, 30.2s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits or transfers motion from')
-    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance)')
-    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, up to 3, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice ("the woman in Image 1 speaks with the voice in Audio 1"). Needs at least one --ref-image or --ref-video alongside it (Hailuo 03 only)')
-    .option('--no-audio', 'Disable audio generation if the model supports it')
-    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
-    .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
-    .option('--task <task>', 'GENFIRE GEDI, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire gedi presets')
-    .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
-    .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
-    .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; aspectRatio?: string; duration?: string; resolution?: string; image?: string; endImage?: string; audio: boolean; bitrateMode?: string; bitrate?: string; task?: string;
-      refImage?: string[]; refVideo?: string[]; refVideoTrim?: string[]; refAudio?: string[];
-      style?: string; damageLevel?: string;
-    }) => {
-      // H3 Max Styles. Checked before anything is uploaded, so a typo'd look
-      // costs a message rather than an upload and a round trip.
-      const videoStyle = opts.style !== undefined ? normalizeCliVideoStyle(opts.style) : undefined;
-      if (opts.style !== undefined && !videoStyle) {
-        throw new CliError(`--style must be one of: ${H3_MAX_STYLE_IDS.join(', ')} (got "${opts.style}").`, 'invalid_video_style');
-      }
-      const damageLevel = opts.damageLevel?.trim().toLowerCase();
-      if (damageLevel !== undefined && !(H3_MAX_DAMAGE_LEVELS as readonly string[]).includes(damageLevel)) {
-        throw new CliError(`--damage-level must be one of: ${H3_MAX_DAMAGE_LEVELS.join(', ')}.`, 'invalid_damage_level');
-      }
-      if (damageLevel !== undefined && videoStyle !== 'vhs') {
-        throw new CliError('--damage-level is the VHS tape wear — pass it with --style vhs.', 'unsupported_damage_level');
-      }
-
+      .description('Generate a video from a prompt — text, start/end frame, first/last frame, references, source clip, keyframes or Kling O3 elements. @<handle> binds an influencer or element on reference-capable models.')
+  , { fileable: true }))
+    .action(async (prompt: string, opts: CommonGenerateOptions & VideoFlags) => {
+      // Shape checks (style, task, trims, frames…) before anything is uploaded.
+      validateVideoFlags(opts);
       const client = await createClient();
-      // Local paths are uploaded first — the API only takes URLs.
-      const resolveAll = async (entries?: string[]) =>
-        entries && entries.length > 0
-          ? await Promise.all(entries.map(async (entry) => (await resolveMediaInput(client, entry)).url))
-          : undefined;
-
-      const imageUrl = opts.image ? (await resolveMediaInput(client, opts.image)).url : undefined;
-      const endImageUrl = opts.endImage ? (await resolveMediaInput(client, opts.endImage)).url : undefined;
-
-      // The end frame is where an image-to-video clip lands — without a start
-      // frame there is nothing to interpolate from. Fail before spending credits.
-      if (endImageUrl && !imageUrl) {
-        throw new CliError(
-          '--end-image is the LAST frame of an image-to-video clip. Pair it with --image.',
-          'missing_start_frame'
-        );
-      }
-      const [referenceImageUrls, referenceVideoUrls, referenceAudioUrls] = await Promise.all([
-        resolveAll(opts.refImage),
-        resolveAll(opts.refVideo),
-        resolveAll(opts.refAudio),
-      ]);
-
-      // --ref-video-trim N:START-END → { index, start, end }. Parsed here so a
-      // typo fails before any credits are spent.
-      const referenceVideoTrims = (opts.refVideoTrim ?? []).map((spec) => {
-        const m = /^(\d+):(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(spec.trim());
-        if (!m) {
-          throw new CliError(`--ref-video-trim "${spec}" must look like N:START-END (e.g. 1:3-8).`, 'invalid_reference_video_trim');
-        }
-        const index = Number(m[1]);
-        const start = Number(m[2]);
-        const end = Number(m[3]);
-        if (!referenceVideoUrls || index >= referenceVideoUrls.length) {
-          throw new CliError(`--ref-video-trim ${spec}: there is no --ref-video #${index} (0-based).`, 'invalid_reference_video_trim');
-        }
-        if (end <= start) {
-          throw new CliError(`--ref-video-trim ${spec}: END must be after START.`, 'invalid_reference_video_trim');
-        }
-        return { index, start, end };
-      });
-
-      // fal rejects an audio-only reference set; fail before spending credits.
-      if (referenceAudioUrls?.length && !referenceImageUrls?.length && !referenceVideoUrls?.length) {
-        throw new CliError(
-          '--ref-audio cannot be the only reference. Add at least one --ref-image or --ref-video.',
-          'invalid_reference_audio'
-        );
-      }
-
-      // Genfire Gedi. Checked here so a typo, or an edit with nothing to edit,
-      // costs a message rather than a round trip and a reservation.
-      const bitrateMode = opts.bitrate ?? opts.bitrateMode;
-      if (bitrateMode && bitrateMode !== 'standard' && bitrateMode !== 'high') {
-        throw new CliError('--bitrate must be standard or high.', 'invalid_bitrate_mode');
-      }
-      const task = opts.task?.trim().toLowerCase();
-      if (task && !['reference', 'editing', 'extension'].includes(task)) {
-        throw new CliError('--task must be reference, editing or extension.', 'invalid_task');
-      }
-      if ((task === 'editing' || task === 'extension') && !referenceVideoUrls?.length) {
-        throw new CliError(
-          `--task ${task} works on an existing clip. Pass it with --ref-video (and cite it as @Video1 in the prompt).`,
-          'task_requires_reference_video'
-        );
-      }
-
+      const body = await buildVideoRequest(opts, async (input) => (await resolveMediaInput(client, input)).url);
       const run = await client.createVideoGeneration(
-        {
-          prompt,
-          // A style only has one engine; everything else keeps the API default.
-          model: opts.model ?? (videoStyle ? H3_MAX_STYLES_ALIAS : undefined),
-          aspect_ratio: opts.aspectRatio,
-          duration: opts.duration ? Number(opts.duration) : undefined,
-          resolution: opts.resolution,
-          image_url: imageUrl,
-          end_image_url: endImageUrl,
-          reference_image_urls: referenceImageUrls,
-          reference_video_urls: referenceVideoUrls,
-          // Typed in @genfire/sdk from the release that adds reference_video_trims;
-          // the API accepts it today, so pass it through ahead of the type bump.
-          ...(referenceVideoTrims.length > 0 ? ({ reference_video_trims: referenceVideoTrims } as Record<string, unknown>) : {}),
-          reference_audio_urls: referenceAudioUrls,
-          generate_audio: opts.audio === false ? false : undefined,
-          bitrate_mode: bitrateMode as ('standard' | 'high' | undefined),
-          // Typed in @genfire/sdk from the release that adds `task`; the API
-          // accepts it today, so pass it through ahead of the type bump.
-          ...(task ? ({ task } as Record<string, unknown>) : {}),
-          // Typed in @genfire/sdk from the release that adds video_style; the
-          // API accepts both today, so pass them through ahead of the type bump.
-          ...(videoStyle ? ({ video_style: videoStyle } as Record<string, unknown>) : {}),
-          ...(damageLevel ? ({ damage_level: damageLevel } as Record<string, unknown>) : {}),
-          ...scopeFields(opts)
-        } as any,
+        { prompt, ...body, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'video', opts);
@@ -400,8 +240,8 @@ export function registerGenerateCommands(program: Command): void {
   // ---- speech ----
   commonOptions(
     generate
-      .command('speech <text>')
-      .description('Synthesize speech from text')
+      .command('speech [text]')
+      .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v3)')
   , { fileable: true })
     .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
     .option('-m, --model <model>', 'Speech model alias')
@@ -419,21 +259,30 @@ export function registerGenerateCommands(program: Command): void {
     .option('--next-text <text>', 'Text spoken right AFTER this chunk — stitching context (ElevenLabs only)')
     .option('--normalize <mode>', 'Text normalization: auto | on | off (ElevenLabs only)')
     .option('--timestamps', 'Include per-word timings in the run output (ElevenLabs only)')
-    .action(async (text: string, opts: CommonGenerateOptions & {
+    .option('--influencer <idOrHandle>', "Speak in an influencer's cloned voice — influencer id or @handle (instead of --voice-id)")
+    .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v3; 2000 characters, 10 voices max)')
+    .option('--stability <0-1>', 'Voice stability (ElevenLabs; also read by dialogue)')
+    .option('--voice-settings <json>', 'Raw ElevenLabs voice_settings object, e.g. \'{"similarity_boost":0.8,"style":0.3}\'')
+    .option('--title <title>', 'Optional title for the run')
+    .action(async (text: string | undefined, opts: CommonGenerateOptions & SpeechExtraFlags & {
       model?: string; voiceId?: string; voiceName?: string; format?: string;
       audioUrl?: string[]; imageUrl?: string; sampleRate?: string; speed?: string; volume?: string; pitch?: string;
       language?: string; seed?: string; previousText?: string; nextText?: string; normalize?: string; timestamps?: boolean;
+      title?: string;
     }) => {
-      const client = await createClient();
       if (opts.normalize && !['auto', 'on', 'off'].includes(opts.normalize)) {
         throw new CliError('--normalize must be auto, on or off', 'invalid_option');
       }
+      const extra = await buildSpeechExtras(text, opts);
+      const client = await createClient();
       const run = await client.createSpeech(
         {
           text,
+          ...extra,
+          title: opts.title,
           voice_id: opts.voiceId,
           voice_name: opts.voiceName,
-          model: opts.model,
+          model: opts.model ?? (extra.dialogue ? 'speech.elevenlabs_dialogue_v3' : undefined),
           output_format: opts.format,
           language_code: opts.language,
           seed: opts.seed ? Number(opts.seed) : undefined,
@@ -466,14 +315,19 @@ export function registerGenerateCommands(program: Command): void {
     .option('--no-diarize', 'Skip speaker labelling (Scribe only)')
     .option('--keyterm <term...>', 'Vocabulary to bias recognition towards (Scribe only)')
     .option('--clean', 'Drop fillers and disfluencies (Scribe only)')
+    .option('--audio-events', 'Tag non-speech audio events like (laughter) (Scribe only)')
+    .option('--speaker-roles', 'Label speakers by role, e.g. interviewer/guest (Scribe only)')
+    .option('--detect-entities <types>', 'Comma-separated entity types to detect, or "all" (Scribe only)')
+    .option('--redact-entities <types>', 'Comma-separated entity types to redact from the transcript (Scribe only)')
     .option('--team <teamId>', 'Bill this run to a workspace credit pool instead of your own balance')
     .option('--project <projectId>', 'File the transcript against its source audio in this project')
-    .option('--quote <token>', 'A quote_token from `genfire cost estimate` — charges the price you were quoted')
+    .option('--quote <token>', 'A quote_token from `genfire cost <kind>` (same flags) — charges the price you were quoted')
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '3s')
     .action(async (url: string, opts: {
       model?: string; video?: boolean; youtube?: boolean;
       language?: string; speakers?: string; diarize?: boolean; keyterm?: string[]; clean?: boolean;
+      audioEvents?: boolean; speakerRoles?: boolean; detectEntities?: string; redactEntities?: string;
       team?: string; project?: string; quote?: string;
       waitTimeout: string; waitInterval: string;
     }) => {
@@ -483,7 +337,11 @@ export function registerGenerateCommands(program: Command): void {
         num_speakers: opts.speakers ? Number(opts.speakers) : undefined,
         diarize: opts.diarize === false ? false : undefined,
         keyterms: opts.keyterm && opts.keyterm.length > 0 ? opts.keyterm : undefined,
-        no_verbatim: opts.clean || undefined
+        no_verbatim: opts.clean || undefined,
+        tag_audio_events: opts.audioEvents || undefined,
+        detect_speaker_roles: opts.speakerRoles || undefined,
+        entity_detection: listish(opts.detectEntities),
+        entity_redaction: listish(opts.redactEntities)
       };
       const scope = scopeFields(opts as CommonGenerateOptions);
       const body = opts.youtube
@@ -541,10 +399,16 @@ export function registerGenerateCommands(program: Command): void {
     .option('--lyrics-file <path>', 'Read the lyrics from a text file instead of --lyrics')
     .option('--steps <n>', 'Flow-matching steps per 8s chunk, 1-100 (MiniMax Music 3 only)')
     .option('--guidance <n>', 'Classifier-free guidance scale, 0-20 (MiniMax Music 3 only)')
+    .option('--video <urlOrPath>', 'Score a video: video-to-music (ElevenLabs music models only; not with --plan-file)')
+    .option('--tag <tag>', 'Style tag to steer the track, e.g. --tag lofi --tag "female vocals" (up to 10; ElevenLabs)', (v: string, p: string[]) => p.concat([v]), [] as string[])
+    .option('--details', 'Return detailed metadata (composition plan + song metadata) with the track (ElevenLabs; priced — see `genfire cost music --details`)')
+    .option('--timestamps', 'Include word timestamps (implies --details)')
+    .option('--store-for-inpainting', 'Keep the song editable for later inpainting (ElevenLabs, with --details)')
     .action(async (prompt: string | undefined, opts: CommonGenerateOptions & {
       model?: string; duration?: string; planFile?: string; seed?: string; flexSections?: boolean;
       format?: string; instrumental?: boolean; imageUrl?: string; negativePrompt?: string;
       lyrics?: string; lyricsFile?: string; steps?: string; guidance?: string;
+      video?: string; tag?: string[]; details?: boolean; timestamps?: boolean; storeForInpainting?: boolean;
     }) => {
       const compositionPlan = opts.planFile ? await readMusicPlanFile(opts.planFile) : undefined;
       if (!prompt && !compositionPlan) {
@@ -567,11 +431,21 @@ export function registerGenerateCommands(program: Command): void {
           'missing_lyrics'
         );
       }
+      if (opts.video && compositionPlan) {
+        throw new CliError('--video (video-to-music) and --plan-file cannot be used together.', 'invalid_arguments');
+      }
       const client = await createClient();
+      const videoUrl = opts.video ? (await resolveMediaInput(client, opts.video)).url : undefined;
       const run = await client.createMusic(
         {
           prompt,
           composition_plan: compositionPlan,
+          video_url: videoUrl,
+          tags: opts.tag && opts.tag.length > 0 ? opts.tag.slice(0, 10) : undefined,
+          // Same spelling `genfire cost music` sends, so its quote is spendable here.
+          include_details: opts.details || opts.timestamps || undefined,
+          with_timestamps: opts.timestamps || undefined,
+          store_for_inpainting: opts.storeForInpainting || undefined,
           model: opts.model,
           duration_seconds: opts.duration ? Number(opts.duration) : undefined,
           seed: opts.seed ? Number(opts.seed) : undefined,

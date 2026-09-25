@@ -144,29 +144,45 @@ export function registerInfluencersCommand(program: Command): void {
 }
 
 /**
- * Resolve an `@<handle>` substring in a prompt to a `{handle, influencer_id}` mention
- * by looking up the user's influencers. Returns `null` when no `@` mention is present.
- * Throws if the handle doesn't match any ready influencer.
+ * Resolve the `@<handle>` mentions in an image prompt.
  *
- * The handle regex deliberately mirrors the backend's accepted format
+ * Returns the first handle that names one of the user's influencers as a
+ * `{handle, influencer_id}` mention (the image route binds ONE influencer, via
+ * the explicit `mentions` array). Handles that name a saved ELEMENT are left in
+ * the prompt untouched — the API resolves `@element` props server-side — so
+ * "@maya holding @red_bottle" binds Maya and the bottle. Returns `null` when
+ * no handle names an influencer. Throws only when NO handle names either an
+ * influencer or an element (almost always a typo, and cheaper to catch before
+ * the run is billed).
+ *
+ * Before this, the FIRST handle had to be an influencer: any element mention
+ * (`genfire elements` advertises exactly that usage) died with
+ * `unknown_influencer_handle`.
+ *
+ * The handle regex mirrors the backend's accepted format
  * (`/^[a-zA-Z0-9_-]{1,32}$/`) so client-side validation matches the contract.
  */
 export async function resolveMentionFromPrompt(
   prompt: string,
   client?: import('@genfire/sdk').GenFireClient
 ): Promise<{ handle: string; influencer_id: string } | null> {
-  const match = prompt.match(/@([a-zA-Z0-9_-]{1,32})\b/);
-  if (!match) return null;
-  const handle = match[1];
+  const handles = [...prompt.matchAll(/(?:^|[^a-zA-Z0-9_.])@([a-zA-Z0-9_-]{1,32})\b/g)].map((m) => m[1]);
+  if (handles.length === 0) return null;
 
   const apiClient = client ?? (await createClient());
-  const response = await apiClient.listInfluencers();
-  const found = response.data.find((i) => i.handle.toLowerCase() === handle.toLowerCase());
-  if (!found) {
-    throw new CliError(
-      `No ready influencer with handle @${handle}. Run \`genfire influencers list\` to see available handles.`,
-      'unknown_influencer_handle'
-    );
+  const influencers = await apiClient.listInfluencers();
+  for (const handle of handles) {
+    const found = influencers.data.find((i) => i.handle.toLowerCase() === handle.toLowerCase());
+    if (found) return { handle: found.handle, influencer_id: found.id };
   }
-  return { handle: found.handle, influencer_id: found.id };
+
+  const elements = await apiClient.listElements();
+  const elementHandles = new Set(elements.data.map((e) => (e.handle || '').toLowerCase()).filter(Boolean));
+  if (handles.some((h) => elementHandles.has(h.toLowerCase()))) return null;
+
+  throw new CliError(
+    `No influencer or element with handle ${handles.map((h) => '@' + h).join(', ')}. ` +
+    'Run `genfire influencers list` or `genfire elements list` to see available handles.',
+    'unknown_mention_handle'
+  );
 }

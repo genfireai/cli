@@ -3,13 +3,24 @@ import { GenFireApiError } from '@genfire/sdk';
 import { createClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, green, printResult, printTable, red, yellow } from '../output.js';
-import { downloadOutputs, extractOutputUrls } from '../runHelpers.js';
+import { join } from 'node:path';
+import { downloadOutputs, extractOutputUrls, waitForRun } from '../runHelpers.js';
 
 function statusColor(status: string): string {
   if (status === 'completed') return green(status);
   if (status === 'failed') return red(status);
   if (status === 'queued' || status === 'processing') return yellow(status);
   return status;
+}
+
+function parseDurationMs(value: string, flag: string): number {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m)?$/i);
+  if (!match) throw new CliError(`Invalid duration for ${flag}: ${value}`, 'invalid_duration');
+  const amount = Number(match[1]);
+  const unit = (match[2] || 's').toLowerCase();
+  if (unit === 'ms') return Math.max(1, Math.round(amount));
+  if (unit === 'm') return Math.round(amount * 60 * 1000);
+  return Math.round(amount * 1000);
 }
 
 export function registerRunsCommand(program: Command): void {
@@ -28,6 +39,7 @@ export function registerRunsCommand(program: Command): void {
     .option('--cursor <cursor>', 'Continue from a previous page (its next_cursor)')
     .option('--team <teamId>', 'Only runs billed to this workspace pool — what the team has made')
     .option('--project <projectId>', 'Only runs filed into this project — what is in this folder')
+    .option('--app <app>', 'Only runs made in one product surface, e.g. marketing-studio')
     .option('-l, --limit <n>', 'Max runs to return', '25')
     .action(async (opts: {
       search?: string;
@@ -38,6 +50,7 @@ export function registerRunsCommand(program: Command): void {
       cursor?: string;
       team?: string;
       project?: string;
+      app?: string;
       limit: string;
     }) => {
       const client = await createClient();
@@ -66,7 +79,8 @@ export function registerRunsCommand(program: Command): void {
         // Not on the pinned SDK's ListRunsParams yet — see the scopeFields note
         // in commands/generate.ts. The API filters on both today.
         ...(opts.team ? { team_id: opts.team } : {}),
-        ...(opts.project ? { project_id: opts.project } : {})
+        ...(opts.project ? { project_id: opts.project } : {}),
+        ...(opts.app ? { app: opts.app } : {})
       } as any);
 
       printResult(response, () => {
@@ -156,5 +170,54 @@ export function registerRunsCommand(program: Command): void {
           }
         });
       }
+    });
+
+  runs
+    .command('wait <runIds...>')
+    .description('Wait for one or more queued runs to finish (e.g. ones started with --no-wait), then print or download their outputs')
+    .option('-o, --output <path>', 'Directory to download completed outputs into (one subfolder per run when waiting on several)')
+    .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
+    .option('--wait-interval <duration>', 'Polling interval', '3s')
+    .action(async (runIds: string[], opts: { output?: string; waitTimeout: string; waitInterval: string }) => {
+      const client = await createClient();
+      const intervalMs = parseDurationMs(opts.waitInterval, '--wait-interval');
+      const timeoutMs = parseDurationMs(opts.waitTimeout, '--wait-timeout');
+      process.stderr.write(`${dim(`Waiting on ${runIds.length} run${runIds.length === 1 ? '' : 's'}...`)}\n`);
+      // In parallel: the slowest run bounds the wait, not the sum.
+      const settled = await Promise.allSettled(
+        runIds.map((id) => waitForRun(client, id, { intervalMs, timeoutMs }))
+      );
+      const results: Array<Record<string, unknown>> = [];
+      for (const [i, outcome] of settled.entries()) {
+        const id = runIds[i];
+        if (outcome.status === 'rejected') {
+          results.push({ id, status: 'unknown', error: (outcome.reason as Error)?.message ?? String(outcome.reason) });
+          continue;
+        }
+        const run = outcome.value;
+        const outputs = run.status === 'completed' ? extractOutputUrls(run, run.capability) : [];
+        let downloaded: string[] | undefined;
+        if (opts.output && outputs.length > 0) {
+          const target = runIds.length > 1 ? join(opts.output, run.id) : opts.output;
+          downloaded = await downloadOutputs(outputs, target);
+        }
+        results.push({
+          id: run.id,
+          status: run.status,
+          capability: run.capability,
+          urls: outputs.map((o) => o.url),
+          ...(downloaded ? { downloaded_to: downloaded } : {}),
+          ...(run.error ? { error: `${run.error.code}: ${run.error.message}` } : {})
+        });
+      }
+      printResult({ object: 'list', data: results }, () => {
+        for (const r of results) {
+          process.stdout.write(`${bold(String(r.id))} ${statusColor(String(r.status))}\n`);
+          if (r.error) process.stdout.write(`  ${red(String(r.error))}\n`);
+          for (const url of (r.urls as string[] | undefined) ?? []) process.stdout.write(`  ${url}\n`);
+          for (const path of (r.downloaded_to as string[] | undefined) ?? []) process.stdout.write(`  ${dim('Saved:')} ${path}\n`);
+        }
+      });
+      if (results.some((r) => r.status !== 'completed')) process.exitCode = 1;
     });
 }

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { GenFireApiError } from '@genfire/sdk';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { createClient } from '../client.js';
+import { createClient, publicApiRequest } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, printResult, printTable } from '../output.js';
 import { registerCanvasWorkflowRunCommands, registerWorkflowEstimateCommand } from './presets.js';
@@ -24,6 +24,35 @@ export function registerWorkflowCommands(program: Command): void {
   // other canvas-surface calls.
   registerWorkflowEstimateCommand(workflow);
   registerCanvasWorkflowRunCommands(workflow);
+
+  // The canvas ids `estimate` / `run-canvas` take. Without this list they had
+  // to be copied out of the dashboard URL.
+  workflow
+    .command('mine')
+    .description('List your own canvas workflows (the ids `workflow estimate` and `run-canvas` take)')
+    .action(async () => {
+      const response = await publicApiRequest<{
+        object: 'list';
+        data: Array<{ id: string; title?: string; nodeCount?: number; updatedAt?: unknown; teamId?: string | null }>;
+      }>('GET', '/user-workflows');
+      printResult(response, () => {
+        if (!response.data?.length) {
+          process.stdout.write(`${dim('No canvas workflows yet. Build one in the dashboard, or fork a preset: genfire preset run <id>')}\n`);
+          return;
+        }
+        printTable(
+          response.data.map((w) => ({
+            id: w.id,
+            title: String(w.title ?? '').slice(0, 40),
+            nodes: w.nodeCount ?? '',
+            team: w.teamId ?? '',
+            updated: typeof w.updatedAt === 'string' ? w.updatedAt.replace('T', ' ').slice(0, 16)
+              : typeof w.updatedAt === 'number' ? new Date(w.updatedAt).toISOString().replace('T', ' ').slice(0, 16) : ''
+          })),
+          ['id', 'title', 'nodes', 'team', 'updated']
+        );
+      });
+    });
 
   workflow
     .command('list')

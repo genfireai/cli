@@ -36,6 +36,13 @@ import { registerSocialCommand } from './commands/social.js';
 import { registerAdsCommand } from './commands/ads.js';
 import { registerUsageCommand } from './commands/usage.js';
 import { registerMcpCommand } from './commands/mcp.js';
+import { registerProjectsCommand } from './commands/projects.js';
+import { registerWorkspacesCommand } from './commands/workspaces.js';
+import { registerMoodboardsCommand } from './commands/moodboards.js';
+import { registerTrainingCommands } from './commands/training.js';
+import { registerComposeCommand } from './commands/compose.js';
+import { registerMarketingCommand } from './commands/marketing.js';
+import { registerTasksCommand } from './commands/tasks.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
 import { VERSION } from './versionCheck.js';
@@ -77,7 +84,7 @@ async function main(): Promise<void> {
   registerVoicesCommand(program);
   registerMusicVideosCommand(program);
   registerBooksCommand(program);
-registerColoringCommand(program);
+  registerColoringCommand(program);
   registerWebhooksCommand(program);
   registerDocumentsCommand(program);
   registerSkillsCommand(program);
@@ -86,6 +93,13 @@ registerColoringCommand(program);
   registerAdsCommand(program);
   registerUsageCommand(program);
   registerMcpCommand(program);
+  registerProjectsCommand(program);
+  registerWorkspacesCommand(program);
+  registerMoodboardsCommand(program);
+  registerTrainingCommands(program);
+  registerComposeCommand(program);
+  registerMarketingCommand(program);
+  registerTasksCommand(program);
 
   // No subcommand + interactive terminal? Drop into the TUI shell.
   // No subcommand + piped/CI? Print help and exit (preserves scriptability).
@@ -108,6 +122,14 @@ registerColoringCommand(program);
 function reportError(err: unknown): void {
   if (err instanceof CliError) {
     process.stderr.write(`Error (${err.code}): ${err.message}\n`);
+    // Commands on `publicApiRequest` (endpoints the pinned SDK lacks) surface
+    // API errors as CliError, so the stale-token hint below has to live here too.
+    if (err.code === 'insufficient_scope') {
+      process.stderr.write(
+        'This token was issued without that scope. Run `genfire auth login` to re-authenticate ' +
+        'with the current scope set.\n'
+      );
+    }
     process.exit(err.exitCode);
   }
   if (err instanceof GenFireApiError) {

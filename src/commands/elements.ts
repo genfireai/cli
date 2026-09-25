@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { GenFireApiError } from '@genfire/sdk';
-import { createClient } from '../client.js';
+import { GenFireApiError, type Element } from '@genfire/sdk';
+import { createClient, publicApiRequest } from '../client.js';
 import { CliError } from '../errors.js';
 import { resolveMediaInput } from '../runHelpers.js';
 import { bold, cyan, dim, green, printResult, printTable } from '../output.js';
@@ -14,21 +14,41 @@ export function registerElementsCommand(program: Command): void {
     .requiredOption('-i, --image <urlOrPath>', 'Element image URL or local path (auto-uploaded).')
     .option('-h, --handle <handle>', 'Short @-mention handle (auto-derived from the name if omitted)')
     .option('-a, --aspect <ratio>', 'Aspect ratio of the image, e.g. 1:1 or 9:16 (informational)')
-    .action(async (name: string, opts: { image: string; handle?: string; aspect?: string }) => {
+    .option('--project <projectId>', 'Also file the element into this project')
+    .action(async (name: string, opts: { image: string; handle?: string; aspect?: string; project?: string }) => {
       const client = await createClient();
       // Auto-upload a local path; pass an https URL through unchanged.
       const resolved = await resolveMediaInput(client, opts.image);
-      const element = await client.createElement({
-        name,
-        imageUrl: resolved.url,
-        handle: opts.handle,
-        aspectRatio: opts.aspect
-      });
+      // The pinned SDK's createElement builds its body field by field and has
+      // no project_id, so a filed element goes straight to POST /v1/elements.
+      const element: Element & { project_id?: string | null } = opts.project
+        ? await publicApiRequest('POST', '/elements', {
+            body: {
+              name,
+              image_url: resolved.url,
+              ...(opts.handle ? { handle: opts.handle } : {}),
+              ...(opts.aspect ? { aspect_ratio: opts.aspect } : {}),
+              project_id: opts.project
+            }
+          })
+        : await client.createElement({
+            name,
+            imageUrl: resolved.url,
+            handle: opts.handle,
+            aspectRatio: opts.aspect
+          });
       printResult(element, () => {
         process.stdout.write(`${green('✓')} Created ${bold('@' + element.handle)}  ${element.name}\n`);
         process.stdout.write(`${dim('ID:')}    ${element.id}\n`);
         if (element.image_url) {
           process.stdout.write(`${dim('Image:')} ${cyan(element.image_url)}\n`);
+        }
+        if (opts.project) {
+          process.stdout.write(
+            element.project_id
+              ? `${dim('Project:')} ${element.project_id}\n`
+              : `${dim(`Not filed into ${opts.project} (the element was still created).`)}\n`
+          );
         }
         process.stdout.write(
           `\n${dim(`Use in prompts: genfire generate video "@${element.handle} on a marble table" --model seedance_2_0`)}\n`
