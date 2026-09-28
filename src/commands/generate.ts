@@ -61,7 +61,7 @@ function scopeFields(opts: CommonGenerateOptions): Record<string, string> {
 /**
  * Read + parse an ElevenLabs music composition plan from a JSON file (the
  * `--plan-file` flag on `generate music`). The file must contain the plan
- * object itself: { sections: [...] } (music_v1) or { chunks: [...] } (music_v2).
+ * object itself: { sections: [...] } (music_v1) or { chunks: [...] } (music_v2 / music_v2_5).
  */
 async function readLyricsFile(path: string): Promise<string> {
   const { readFile } = await import('node:fs/promises');
@@ -89,7 +89,7 @@ async function readMusicPlanFile(path: string): Promise<Record<string, unknown>>
   const plan = parsed as Record<string, unknown> | null;
   if (!plan || typeof plan !== 'object' || Array.isArray(plan) || (!Array.isArray(plan.sections) && !Array.isArray(plan.chunks))) {
     throw new CliError(
-      `--plan-file ${path} must contain a composition plan object with a sections (music_v1) or chunks (music_v2) array`,
+      `--plan-file ${path} must contain a composition plan object with a sections (music_v1) or chunks (music_v2 / music_v2_5) array`,
       'invalid_plan_file'
     );
   }
@@ -241,26 +241,26 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('speech [text]')
-      .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v3)')
+      .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v3, or _v4 via -m)')
   , { fileable: true })
     .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
-    .option('-m, --model <model>', 'Speech model alias')
+    .option('-m, --model <model>', 'Speech model alias (default speech.elevenlabs_flash_v2_5; speech.elevenlabs_v4 = most expressive, speech.elevenlabs_v4_turbo = v4 at half the cost)')
     .option('--voice-name <name>', 'Optional friendly voice name for logs')
     .option('--format <format>', 'Output format, e.g. mp3_44100_128 (Seed Audio: wav|mp3|pcm|ogg_opus)')
     .option('--audio-url <url...>', 'Reference audio URL(s), up to 3 — reference in the text as @Audio1–@Audio3 (Seed Audio 1.0 only)')
     .option('--image-url <url>', 'Reference image URL, not combinable with --audio-url (Seed Audio 1.0 only)')
     .option('--sample-rate <hz>', 'Output sample rate in Hz: 8000|16000|24000|32000|44100|48000 (Seed Audio 1.0 only)')
-    .option('--speed <speed>', 'Speaking rate: ElevenLabs 0.7–1.2, Seed Audio 0.5–2')
+    .option('--speed <speed>', 'Speaking rate: ElevenLabs 0.7–1.2 (ignored by v4), Seed Audio 0.5–2')
     .option('--volume <volume>', 'Volume 0.5–2 (Seed Audio 1.0 only)')
     .option('--pitch <semitones>', 'Pitch shift in semitones -12..12 (Seed Audio 1.0 only)')
-    .option('--language <code>', 'ISO 639-1 code to enforce, e.g. es (ElevenLabs Flash/Turbo/v3 only)')
+    .option('--language <code>', 'ISO 639-1 code to enforce, e.g. es (ElevenLabs Flash/Turbo/v3/v4 only)')
     .option('--seed <n>', 'Seed for best-effort reproducibility (ElevenLabs only)')
     .option('--previous-text <text>', 'Text spoken right BEFORE this chunk — stitching context (ElevenLabs only)')
     .option('--next-text <text>', 'Text spoken right AFTER this chunk — stitching context (ElevenLabs only)')
     .option('--normalize <mode>', 'Text normalization: auto | on | off (ElevenLabs only)')
     .option('--timestamps', 'Include per-word timings in the run output (ElevenLabs only)')
     .option('--influencer <idOrHandle>', "Speak in an influencer's cloned voice — influencer id or @handle (instead of --voice-id)")
-    .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v3; 2000 characters, 10 voices max)')
+    .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v3; pass -m speech.elevenlabs_dialogue_v4 for v4; 2000 characters, 10 voices max)')
     .option('--stability <0-1>', 'Voice stability (ElevenLabs; also read by dialogue)')
     .option('--voice-settings <json>', 'Raw ElevenLabs voice_settings object, e.g. \'{"similarity_boost":0.8,"style":0.3}\'')
     .option('--title <title>', 'Optional title for the run')
@@ -386,9 +386,9 @@ export function registerGenerateCommands(program: Command): void {
       .command('music [prompt]')
       .description('Generate music from a prompt, or from a composition plan via --plan-file')
   , { fileable: true })
-    .option('-m, --model <model>', 'Music model alias (music.elevenlabs_music_v1 | music.elevenlabs_music_v2 | music.elevenlabs_music_v2_5 | music.lyria_3_5 | music.lyria3_pro | music.minimax_music_3)')
+    .option('-m, --model <model>', 'Music model alias (default music.elevenlabs_music_v2_5 — newest ElevenLabs | music.elevenlabs_music_v2 | music.elevenlabs_music_v1 (deprecated upstream) | music.lyria_3_5 | music.lyria3_pro | music.minimax_music_3)')
     .option('-d, --duration <seconds>', 'Duration in seconds. ElevenLabs prompt mode: 3-600. MiniMax Music 3: an upper bound of 1-300 (default 60) that billing is charged on. Lyria (3.5 / 3 Pro) ignores it — steer length in the prompt')
-    .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 (a chunks plan implies music_v2)')
+    .option('--plan-file <path>', 'JSON file with an ElevenLabs composition plan instead of a prompt: { sections: [...] } for music_v1 or { chunks: [...] } for music_v2 / music_v2_5 (a chunks plan with no --model runs on the default music_v2_5)')
     .option('--seed <n>', 'Random seed for more consistent results (with --plan-file only)')
     .option('--flex-sections', 'Let music_v1 flex section durations of a --plan-file for quality (durations are strict by default)')
     .option('--format <format>', 'Output format')

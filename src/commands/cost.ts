@@ -92,7 +92,7 @@ export function registerCostCommand(program: Command): void {
   cost
     .command('speech [text]')
     .description('Estimate the credit cost of a speech generation (or a --dialogue-file dialogue)')
-    .option('-m, --model <model>', 'Public speech model alias (required unless --dialogue-file, which implies speech.elevenlabs_dialogue_v3)')
+    .option('-m, --model <model>', 'Public speech model alias (required unless --dialogue-file, which implies speech.elevenlabs_dialogue_v3; v4 dialogue: speech.elevenlabs_dialogue_v4)')
     .option('--voice-id <id>', 'Voice id (affects the billing rate)')
     .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines — priced on the characters across all lines')
     .action(async (text: string | undefined, opts: { model?: string; voiceId?: string; dialogueFile?: string }) => {
