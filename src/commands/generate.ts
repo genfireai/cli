@@ -241,16 +241,16 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('speech [text]')
-      .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v3, or _v4 via -m)')
+      .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v4, or _v3 via -m)')
   , { fileable: true })
     .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
-    .option('-m, --model <model>', 'Speech model alias (default speech.elevenlabs_flash_v2_5; speech.elevenlabs_v4 = most expressive, speech.elevenlabs_v4_turbo = v4 at half the cost)')
+    .option('-m, --model <model>', 'Speech model alias (default speech.elevenlabs_v4_turbo, or speech.elevenlabs_flash_v2_5 past 10,000 characters; speech.elevenlabs_v4 = most expressive; pin speech.elevenlabs_flash_v2_5 for --speed)')
     .option('--voice-name <name>', 'Optional friendly voice name for logs')
     .option('--format <format>', 'Output format, e.g. mp3_44100_128 (Seed Audio: wav|mp3|pcm|ogg_opus)')
     .option('--audio-url <url...>', 'Reference audio URL(s), up to 3 — reference in the text as @Audio1–@Audio3 (Seed Audio 1.0 only)')
     .option('--image-url <url>', 'Reference image URL, not combinable with --audio-url (Seed Audio 1.0 only)')
     .option('--sample-rate <hz>', 'Output sample rate in Hz: 8000|16000|24000|32000|44100|48000 (Seed Audio 1.0 only)')
-    .option('--speed <speed>', 'Speaking rate: ElevenLabs 0.7–1.2 (ignored by v4), Seed Audio 0.5–2')
+    .option('--speed <speed>', 'Speaking rate: ElevenLabs 0.7–1.2 (ignored by v4 and the v4 Turbo default — pin -m speech.elevenlabs_flash_v2_5), Seed Audio 0.5–2')
     .option('--volume <volume>', 'Volume 0.5–2 (Seed Audio 1.0 only)')
     .option('--pitch <semitones>', 'Pitch shift in semitones -12..12 (Seed Audio 1.0 only)')
     .option('--language <code>', 'ISO 639-1 code to enforce, e.g. es (ElevenLabs Flash/Turbo/v3/v4 only)')
@@ -260,7 +260,7 @@ export function registerGenerateCommands(program: Command): void {
     .option('--normalize <mode>', 'Text normalization: auto | on | off (ElevenLabs only)')
     .option('--timestamps', 'Include per-word timings in the run output (ElevenLabs only)')
     .option('--influencer <idOrHandle>', "Speak in an influencer's cloned voice — influencer id or @handle (instead of --voice-id)")
-    .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v3; pass -m speech.elevenlabs_dialogue_v4 for v4; 2000 characters, 10 voices max)')
+    .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v4; pass -m speech.elevenlabs_dialogue_v3 for v3; 2000 characters, 10 voices max)')
     .option('--stability <0-1>', 'Voice stability (ElevenLabs; also read by dialogue)')
     .option('--voice-settings <json>', 'Raw ElevenLabs voice_settings object, e.g. \'{"similarity_boost":0.8,"style":0.3}\'')
     .option('--title <title>', 'Optional title for the run')
@@ -282,7 +282,7 @@ export function registerGenerateCommands(program: Command): void {
           title: opts.title,
           voice_id: opts.voiceId,
           voice_name: opts.voiceName,
-          model: opts.model ?? (extra.dialogue ? 'speech.elevenlabs_dialogue_v3' : undefined),
+          model: opts.model ?? (extra.dialogue ? 'speech.elevenlabs_dialogue_v4' : undefined),
           output_format: opts.format,
           language_code: opts.language,
           seed: opts.seed ? Number(opts.seed) : undefined,
