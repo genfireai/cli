@@ -7,20 +7,19 @@ Command-line interface for [Genfire](https://genfire.ai) — generate images, vi
 Pick whichever you prefer:
 
 ```bash
-# Homebrew (macOS / Linux)
-brew install genfireai/tap/genfire
+# npm (requires Node 20+) — always the latest release
+npm install -g @genfire/cli
 
 # Install script (auto-installs Node if needed)
 curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh
 
-# npm (requires Node 20+)
-npm install -g @genfire/cli
+# Homebrew (macOS / Linux)
+brew install genfireai/tap/genfire
 ```
 
 Pin to a specific version:
 
 ```bash
-brew install genfireai/tap/genfire    # always installs the latest stable
 curl -fsSL https://raw.githubusercontent.com/genfireai/cli/main/install.sh | sh -s -- --version 0.3.5
 npm install -g @genfire/cli@0.3.5
 ```
@@ -103,7 +102,7 @@ genfire mcp setup --client claude-desktop
 genfire mcp setup --client cursor
 ```
 
-This reads the key from your keychain and writes the correct MCP config. Restart your client, then run `/mcp` (Claude Code) or check MCP settings to confirm the Genfire tools are connected (~100 in the default profile; the `/lite` profile exposes a trimmed set).
+This reads the key from your keychain and writes the correct MCP config. Restart your client, then run `/mcp` (Claude Code) or check MCP settings to confirm the Genfire tools are connected (150+ in the default profile; the `/lite` profile exposes a trimmed set).
 
 ## Commands
 
