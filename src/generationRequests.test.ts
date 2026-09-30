@@ -172,6 +172,42 @@ test('video validation fails before anything uploads', () => {
   assert.throws(() => validateVideoFlags({ keyframe: ['start.png'] }), /FRAME:urlOrPath/);
 });
 
+test('H3 Max Insert: the window + --no-color-match reach both bodies identically, and pick the model', async () => {
+  const flags = [
+    '--source-video', 'https://cdn.example/src.mp4', '--insert-start', '2.5s', '--insert-resume', '6',
+    '--ref-image', 'https://cdn.example/dragon.png', '-d', '8', '-r', '480p', '--no-color-match'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'video', 'a dragon swoops past', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', 'a dragon swoops past', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'a dragon swoops past');
+  assert.deepEqual(genRest, est);
+  assert.equal(est.model, 'video.hailuo_03_max_insert');
+  assert.equal(est.insert_start_time, 2.5);
+  assert.equal(est.insert_resume_time, 6);
+  assert.equal(est.color_match, false);
+
+  // color_match is only ever the explicit opt-out; an explicit -m is kept.
+  const plain = await buildVideoRequest({ model: 'video.hailuo_03_max_insert', sourceVideo: 'src.mp4', insertStart: '2', insertResume: '4', colorMatch: true }, passthrough);
+  assert.equal('color_match' in plain, false);
+  assert.equal(plain.model, 'video.hailuo_03_max_insert');
+  const other = await buildVideoRequest({ model: 'video.veo_3_1', colorMatch: true }, passthrough);
+  for (const key of ['insert_start_time', 'insert_resume_time', 'color_match']) assert.equal(key in other, false);
+});
+
+test('H3 Max Insert flag validation fails before anything uploads', () => {
+  const src = { sourceVideo: 'src.mp4' };
+  assert.throws(() => validateVideoFlags({ ...src, insertStart: '2' }), /pass both/);
+  assert.throws(() => validateVideoFlags({ ...src, insertResume: '4' }), /pass both/);
+  assert.throws(() => validateVideoFlags({ ...src, insertStart: '1', insertResume: '4' }), /--insert-start must be between/);
+  assert.throws(() => validateVideoFlags({ ...src, insertStart: '5', insertResume: '3' }), /must be later than/);
+  assert.throws(() => validateVideoFlags({ ...src, insertStart: '2', insertResume: '61' }), /--insert-resume must be between/);
+  assert.throws(() => validateVideoFlags({ ...src, insertStart: 'soon', insertResume: '4' }), /must be a number/);
+  assert.throws(() => validateVideoFlags({ insertStart: '2', insertResume: '4' }), /--source-video/);
+  assert.throws(() => validateVideoFlags({ colorMatch: false }), /--insert-start/);
+  assert.doesNotThrow(() => validateVideoFlags({ ...src, insertStart: '2', insertResume: '4', colorMatch: false }));
+});
+
 test('image builder: styles, Z-Image tuning and grounding', async () => {
   const body = await buildImageRequest({
     model: 'image.z_image_turbo',

@@ -254,6 +254,13 @@ export const CAMERA_PATH_IDS = [
   'crane_up', 'low_angle', 'top_down', 'arc_push', 'spiral', 'hero_reveal'
 ] as const;
 const VIDEO_TASKS = ['reference', 'editing', 'extension'] as const;
+// H3 Max Insert — mirrored from backend/src/lib/models/h3MaxInsert.ts
+// (H3_MAX_INSERT_PUBLIC_ALIAS / _MIN_START_SECONDS / _MAX_TIME_SECONDS). The
+// API re-checks the window against the MEASURED source; these are the
+// clip-independent bounds only.
+export const H3_MAX_INSERT_ALIAS = 'video.hailuo_03_max_insert';
+const H3_MAX_INSERT_MIN_START_SECONDS = 1.625;
+const H3_MAX_INSERT_MAX_TIME_SECONDS = 60;
 
 /** `Low Poly`, `low-poly`, `retro-toon-70s` → the canonical id, or undefined. */
 export function normalizeVideoStyle(value: string): (typeof H3_MAX_STYLE_IDS)[number] | undefined {
@@ -293,6 +300,10 @@ export interface VideoFlags extends GroundingFlags {
   task?: string;
   style?: string;
   damageLevel?: string;
+  insertStart?: string;
+  insertResume?: string;
+  /** commander's `--no-color-match`: true unless negated. */
+  colorMatch?: boolean;
 }
 
 export function addVideoRequestOptions(cmd: Command): Command {
@@ -326,7 +337,10 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
     .option('--task <task>', 'GENFIRE GEDI, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire gedi presets')
     .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
-    .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`);
+    .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
+    .option('--insert-start <seconds>', `H3 Max Insert: second of --source-video where the NEW scene begins (≥${H3_MAX_INSERT_MIN_START_SECONDS}). Needs --insert-resume; runs on ${H3_MAX_INSERT_ALIAS} (picked for you when -m is omitted). The prompt and/or --ref-image (≤9) / --ref-video (≤3) describe the new scene; -d (5-13) is the new scene's length and the only seconds billed; the whole edited clip comes back`)
+    .option('--insert-resume <seconds>', `H3 Max Insert: second where the original footage picks up again — after --insert-start, ≤${H3_MAX_INSERT_MAX_TIME_SECONDS} and before the clip ends (leave footage after it for the transition)`)
+    .option('--no-color-match', 'H3 Max Insert: do not grade the new scene to the source (it is colour-matched by default)');
   return addGroundingOptions(cmd);
 }
 
@@ -365,6 +379,23 @@ export function parseMultiPrompt(specs: string[] | undefined): Array<{ prompt: s
     if (!spec.trim()) throw new CliError('--multi-prompt needs a prompt.', 'invalid_multi_prompt');
     return { prompt: spec.trim() };
   });
+}
+
+/** `--insert-start` / `--insert-resume` → seconds, clip-independent bounds checked; undefined when neither was passed. */
+export function parseInsertWindow(opts: Pick<VideoFlags, 'insertStart' | 'insertResume' | 'sourceVideo'>): { start: number; resume: number } | undefined {
+  if (opts.insertStart === undefined && opts.insertResume === undefined) return undefined;
+  if (opts.insertStart === undefined || opts.insertResume === undefined) {
+    throw new CliError('--insert-start and --insert-resume are the two edit points of H3 Max Insert — pass both.', 'insert_window_required');
+  }
+  const start = num(opts.insertStart.replace(/s$/i, ''), '--insert-start', { min: H3_MAX_INSERT_MIN_START_SECONDS, max: H3_MAX_INSERT_MAX_TIME_SECONDS })!;
+  const resume = num(opts.insertResume.replace(/s$/i, ''), '--insert-resume', { min: H3_MAX_INSERT_MIN_START_SECONDS, max: H3_MAX_INSERT_MAX_TIME_SECONDS })!;
+  if (resume <= start) {
+    throw new CliError(`--insert-resume (${resume}) must be later than --insert-start (${start}).`, 'invalid_insert_window');
+  }
+  if (!opts.sourceVideo) {
+    throw new CliError('H3 Max Insert cuts a new scene into an existing clip — pass it with --source-video.', 'source_video_url_required');
+  }
+  return { start, resume };
 }
 
 /** Validation that needs no network — runs before anything is uploaded. */
@@ -414,6 +445,10 @@ export function validateVideoFlags(opts: VideoFlags): void {
     throw new CliError('Pass --camera-path OR --camera-trajectory, not both.', 'invalid_camera_trajectory');
   }
   num(opts.duration, '--duration', { int: true, min: 1, max: 30 });
+  const insertWindow = parseInsertWindow(opts);
+  if (opts.colorMatch === false && !insertWindow) {
+    throw new CliError('--no-color-match is an H3 Max Insert setting — pass it with --insert-start / --insert-resume.', 'unsupported_color_match');
+  }
   parseRefVideoTrims(opts.refVideoTrim, opts.refVideo?.length ?? 0);
   parseMultiPrompt(opts.multiPrompt);
   parseLoraSpecs(opts.lora, '--lora', 3);
@@ -438,6 +473,7 @@ async function resolveAll(entries: string[] | undefined, resolveMedia: MediaReso
 export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaResolver): Promise<Record<string, unknown>> {
   validateVideoFlags(opts);
   const style = opts.style !== undefined ? normalizeVideoStyle(opts.style) : undefined;
+  const insertWindow = parseInsertWindow(opts);
 
   const [referenceImageUrls, referenceVideoUrls, referenceAudioUrls] = await Promise.all([
     resolveAll(opts.refImage, resolveMedia),
@@ -470,8 +506,9 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
 
   const one = async (value: string | undefined) => (value ? resolveMedia(value) : undefined);
   return compact({
-    // A style only has one engine; everything else keeps the API default.
-    model: opts.model ?? (style ? H3_MAX_STYLES_ALIAS : undefined),
+    // A style, and an insert window, each have one engine; everything else
+    // keeps the API default.
+    model: opts.model ?? (style ? H3_MAX_STYLES_ALIAS : insertWindow ? H3_MAX_INSERT_ALIAS : undefined),
     aspect_ratio: opts.aspectRatio,
     duration: num(opts.duration, '--duration', { int: true }),
     resolution: opts.resolution,
@@ -503,6 +540,11 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
     task: opts.task?.trim().toLowerCase(),
     video_style: style,
     damage_level: opts.damageLevel?.trim().toLowerCase(),
+    insert_start_time: insertWindow?.start,
+    insert_resume_time: insertWindow?.resume,
+    // Only the explicit opt-out is sent: the API defaults to true, and any
+    // other model 400s a color_match it was sent.
+    color_match: opts.colorMatch === false ? false : undefined,
     ...(await buildGrounding(opts, resolveMedia))
   });
 }
