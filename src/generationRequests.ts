@@ -261,6 +261,21 @@ const VIDEO_TASKS = ['reference', 'editing', 'extension'] as const;
 export const H3_MAX_INSERT_ALIAS = 'video.hailuo_03_max_insert';
 const H3_MAX_INSERT_MIN_START_SECONDS = 1.625;
 const H3_MAX_INSERT_MAX_TIME_SECONDS = 60;
+// H3 Max Recast — mirrored from backend/src/lib/models/h3MaxRecast.ts
+// (H3_MAX_RECAST_PUBLIC_ALIAS / _MAX_REFERENCE_IMAGES / _MIN/_MAX_SOURCE_SECONDS)
+// and the registry's `limits.resolutions`. No flag of its own: the clip rides
+// --source-video and the cast --ref-image. The API measures the clip (its
+// length is the price) and stays the validator of record; these are the
+// input-shape rules a run would 400 on anyway.
+export const H3_MAX_RECAST_ALIAS = 'video.hailuo_03_max_recast';
+const H3_MAX_RECAST_MAX_REFERENCE_IMAGES = 4;
+const H3_MAX_RECAST_RESOLUTIONS = ['768p', '1080p'] as const;
+
+/** True for the Recast alias however it is spelled (the seam's own normalisation). */
+export function isH3MaxRecastAlias(model?: string): boolean {
+  const normalized = String(model || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return normalized.includes('h3_max_recast') || normalized.includes('hailuo_03_max_recast');
+}
 
 /** `Low Poly`, `low-poly`, `retro-toon-70s` → the canonical id, or undefined. */
 export function normalizeVideoStyle(value: string): (typeof H3_MAX_STYLE_IDS)[number] | undefined {
@@ -311,14 +326,14 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1 (default: the API default video model)')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`)')
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5)')
-    .option('-r, --resolution <resolution>', 'Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k). Higher resolutions cost more credits.')
+    .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
     .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id')
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
     .option('--start-image <urlOrPath>', 'Kling O3 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
-    .option('--source-video <urlOrPath>', 'Source clip to edit / extend / restyle (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip\'s measured length')
-    .option('--ref-image <urlOrPath...>', 'Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5')
+    .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add`)
+    .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
     .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 1.8-30.2s, 30.2s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits or transfers motion from')
     .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
@@ -398,8 +413,41 @@ export function parseInsertWindow(opts: Pick<VideoFlags, 'insertStart' | 'insert
   return { start, resume };
 }
 
+/**
+ * H3 Max Recast's input shape, refused locally before anything uploads: the
+ * clip and at least one cast photo are both required (there is no text or
+ * image mode to fall back on), the cast caps at 4, and it has no reference
+ * clip / audio pool or start frame. A no-op for every other model.
+ */
+export function validateRecastFlags(opts: VideoFlags): void {
+  if (!isH3MaxRecastAlias(opts.model)) return;
+  if (!opts.sourceVideo) {
+    throw new CliError('H3 Max Recast recasts the people in an existing clip — pass it with --source-video (5-30s).', 'source_video_url_required');
+  }
+  if (opts.image || opts.startImage || opts.endImage || opts.firstFrame || opts.lastFrame) {
+    throw new CliError('H3 Max Recast takes the new people\'s photos as --ref-image, not as a start / end frame.', 'unsupported_input_combination');
+  }
+  const cast = opts.refImage?.length ?? 0;
+  if (cast === 0) {
+    throw new CliError('H3 Max Recast needs a photo of each new person — pass 1-4 with --ref-image (photo 1 replaces the leftmost main person).', 'reference_image_urls_required');
+  }
+  if (cast > H3_MAX_RECAST_MAX_REFERENCE_IMAGES) {
+    throw new CliError(`H3 Max Recast takes up to ${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} people (one --ref-image each) — remove ${cast - H3_MAX_RECAST_MAX_REFERENCE_IMAGES}.`, 'invalid_reference_image_urls');
+  }
+  if (opts.refVideo?.length || opts.refAudio?.length) {
+    throw new CliError('H3 Max Recast takes cast photos only — no --ref-video or --ref-audio (the clip keeps its own sound).', 'unsupported_reference_media');
+  }
+  // Spelled as the API lists it (`limits.resolutions`, lower-case) — that is
+  // what the body sends and what the API checks.
+  const resolution = opts.resolution?.trim();
+  if (resolution !== undefined && !(H3_MAX_RECAST_RESOLUTIONS as readonly string[]).includes(resolution)) {
+    throw new CliError(`H3 Max Recast renders ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} (got "${opts.resolution}").`, 'invalid_resolution');
+  }
+}
+
 /** Validation that needs no network — runs before anything is uploaded. */
 export function validateVideoFlags(opts: VideoFlags): void {
+  validateRecastFlags(opts);
   const style = opts.style !== undefined ? normalizeVideoStyle(opts.style) : undefined;
   if (opts.style !== undefined && !style) {
     throw new CliError(`--style must be one of: ${H3_MAX_STYLE_IDS.join(', ')} (got "${opts.style}").`, 'invalid_video_style');

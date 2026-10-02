@@ -208,6 +208,39 @@ test('H3 Max Insert flag validation fails before anything uploads', () => {
   assert.doesNotThrow(() => validateVideoFlags({ ...src, insertStart: '2', insertResume: '4', colorMatch: false }));
 });
 
+test('H3 Max Recast: clip + cast ride the existing flags, identically on cost and generate, with an empty prompt', async () => {
+  const flags = [
+    '-m', 'video.hailuo_03_max_recast', '--source-video', 'https://cdn.example/src.mp4',
+    '--ref-image', 'https://cdn.example/p1.png', '--ref-image', 'https://cdn.example/p2.png', '-r', '768p'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'video', '', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, '');
+  assert.deepEqual(genRest, est);
+  assert.equal(est.model, 'video.hailuo_03_max_recast');
+  assert.equal(est.source_video_url, 'https://cdn.example/src.mp4');
+  assert.deepEqual(est.reference_image_urls, ['https://cdn.example/p1.png', 'https://cdn.example/p2.png']);
+  assert.equal(est.resolution, '768p');
+  // No window, no duration default: nothing Insert-shaped rides along.
+  for (const key of ['insert_start_time', 'insert_resume_time', 'color_match', 'duration']) assert.equal(key in est, false);
+});
+
+test('H3 Max Recast flag validation fails before anything uploads — and only on Recast', () => {
+  const recast = { model: 'video.hailuo_03_max_recast', sourceVideo: 'src.mp4', refImage: ['a.png'] };
+  assert.doesNotThrow(() => validateVideoFlags(recast));
+  assert.doesNotThrow(() => validateVideoFlags({ ...recast, refImage: ['a', 'b', 'c', 'd'], resolution: '1080p' }));
+  assert.throws(() => validateVideoFlags({ ...recast, sourceVideo: undefined }), /--source-video/);
+  assert.throws(() => validateVideoFlags({ ...recast, refImage: undefined }), /pass 1-4 with --ref-image/);
+  assert.throws(() => validateVideoFlags({ ...recast, refImage: ['a', 'b', 'c', 'd', 'e'] }), /up to 4 people .* remove 1/);
+  assert.throws(() => validateVideoFlags({ ...recast, refVideo: ['r.mp4'] }), /cast photos only/);
+  assert.throws(() => validateVideoFlags({ ...recast, image: 'start.png' }), /as --ref-image, not as a start/);
+  assert.throws(() => validateVideoFlags({ ...recast, resolution: '480p' }), /768p or 1080p/);
+  // The same flags on any other model are untouched by the Recast rules.
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.hailuo_03_max', resolution: '480p' }));
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.hailuo_03_max_3d', sourceVideo: 'src.mp4' }));
+});
+
 test('image builder: styles, Z-Image tuning and grounding', async () => {
   const body = await buildImageRequest({
     model: 'image.z_image_turbo',
