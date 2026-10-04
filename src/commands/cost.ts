@@ -68,7 +68,7 @@ export function registerCostCommand(program: Command): void {
   addVideoRequestOptions(
     cost
       .command('video [prompt]')
-      .description('Estimate the credit cost of a video generation — accepts every `generate video` flag, so references, source clips, Gedi tasks and LoRAs route (and price) like the real call')
+      .description('Estimate the credit cost of a video generation — accepts every `generate video` flag, so references, source clips, Genjudo tasks and LoRAs route (and price) like the real call')
   )
     .option('-n, --count <n>', 'Number of clips to price (estimate only — each `generate video` run makes one)')
     .option('--image-url <url>', 'Deprecated alias of --image')

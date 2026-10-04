@@ -56,7 +56,7 @@ export function registerModelsCommand(program: Command): void {
         }
         printTable(modelsToRows(filtered), ['id', 'capability', 'name', 'default', 'inputs']);
         process.stdout.write(
-          `\n${dim(`Inputs key: t2o = text-to-output, i2o = image-to-output, ref = reference images, v2v = source video, motion = motion control, flf = first/last frame, end = end frame, refav = reference video/audio, kf = keyframes, task = Gedi task, mask = inpaint mask, cam = camera path, style = video styles`)}\n`
+          `\n${dim(`Inputs key: t2o = text-to-output, i2o = image-to-output, ref = reference images, v2v = source video, motion = motion control, flf = first/last frame, end = end frame, refav = reference video/audio, kf = keyframes, task = Genjudo task, mask = inpaint mask, cam = camera path, style = video styles`)}\n`
         );
       });
     });

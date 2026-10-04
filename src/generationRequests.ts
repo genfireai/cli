@@ -17,7 +17,7 @@ import { CliError } from './errors.js';
  *     `--no-audio` default), `generate video` sent nothing → same 409;
  *   - `cost video` could not express a reference video / source video / task /
  *     first-last frame / keyframes / LoRA at all, so it quoted the wrong
- *     endpoint (t2v rate for a Gedi edit).
+ *     endpoint (t2v rate for a Genjudo edit).
  * Building both bodies here makes "quote === charge" a property of the code
  * rather than of the user remembering to pass identical flags.
  *
@@ -350,7 +350,7 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
-    .option('--task <task>', 'GENFIRE GEDI, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire gedi presets')
+    .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire genjudo presets')
     .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
     .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
     .option('--insert-start <seconds>', `H3 Max Insert: second of --source-video where the NEW scene begins (≥${H3_MAX_INSERT_MIN_START_SECONDS}). Needs --insert-resume; runs on ${H3_MAX_INSERT_ALIAS} (picked for you when -m is omitted). The prompt and/or --ref-image (≤9) / --ref-video (≤3) describe the new scene; -d (5-13) is the new scene's length and the only seconds billed; the whole edited clip comes back`)
@@ -515,7 +515,7 @@ async function resolveAll(entries: string[] | undefined, resolveMedia: MediaReso
 /**
  * The `/v1/videos/generations` body (minus `prompt` and the run-scoping
  * fields). `genfire cost video` posts the same object to
- * /v1/models/estimate-cost, so the routing (t2v / i2v / ref / edit / Gedi
+ * /v1/models/estimate-cost, so the routing (t2v / i2v / ref / edit / Genjudo
  * video-ref) and the quote fingerprint match the real submit.
  */
 export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaResolver): Promise<Record<string, unknown>> {
