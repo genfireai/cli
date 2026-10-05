@@ -313,6 +313,8 @@ export interface VideoFlags extends GroundingFlags {
   bitrate?: string;
   bitrateMode?: string;
   task?: string;
+  /** Seedance 2.5 draft: a 480p preview the 1080p final is rendered from. */
+  draft?: boolean;
   style?: string;
   damageLevel?: string;
   insertStart?: string;
@@ -350,6 +352,7 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
+    .option('--draft', 'video.seedance_2_5 only: render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p, within 7 days')
     .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire genjudo presets')
     .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
     .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
@@ -586,6 +589,9 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
     generate_audio: opts.audio === false ? false : undefined,
     bitrate_mode: opts.bitrate ?? opts.bitrateMode,
     task: opts.task?.trim().toLowerCase(),
+    // Only when set: the API keys `draft` into the quote fingerprint only
+    // when sent, so an absent flag keeps every non-draft quote spendable.
+    draft: opts.draft ? true : undefined,
     video_style: style,
     damage_level: opts.damageLevel?.trim().toLowerCase(),
     insert_start_time: insertWindow?.start,
@@ -595,6 +601,21 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
     color_match: opts.colorMatch === false ? false : undefined,
     ...(await buildGrounding(opts, resolveMedia))
   });
+}
+
+// ─── Seedance 2.5 draft → 1080p final ────────────────────────────────────────
+
+/**
+ * The /v1 path of a draft's 1080p final (or its estimate). Takes the draft's
+ * run id (`run_…`, or a `dash_video_…` id from `genfire runs list`) or its
+ * output video_id — whatever `generate video --draft` printed.
+ */
+export function draftFinalPath(draftId: string, estimate = false): string {
+  const id = String(draftId ?? '').trim();
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new CliError('Pass the draft\'s run id (run_…) from `genfire generate video --draft`, or its output video_id.', 'invalid_draft_id');
+  }
+  return `/videos/generations/${encodeURIComponent(id)}/final${estimate ? '/estimate' : ''}`;
 }
 
 // ─── Speech ──────────────────────────────────────────────────────────────────

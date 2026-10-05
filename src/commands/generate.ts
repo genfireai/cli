@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { GenFireClient } from '@genfire/sdk';
 import { randomUUID } from 'node:crypto';
-import { createClient } from '../client.js';
+import { createClient, publicApiRequest } from '../client.js';
 import { CliError } from '../errors.js';
 import { dim, printResult, yellow } from '../output.js';
 import {
@@ -23,6 +23,7 @@ import {
   type ImageFlags,
   type VideoFlags,
   buildSpeechExtras,
+  draftFinalPath,
   type SpeechExtraFlags
 } from '../generationRequests.js';
 
@@ -234,6 +235,32 @@ export function registerGenerateCommands(program: Command): void {
         { prompt, ...body, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
       );
+      if (opts.draft) {
+        process.stderr.write(`${dim('Draft (480p). For the 1080p final of this shot:')} genfire generate draft-final ${run.id}\n`);
+      }
+      await maybeFinish(client, run.id, 'video', opts);
+    });
+
+  // ---- Seedance 2.5 draft → 1080p final ----
+  // Not commonOptions: the final bills whoever paid for the draft, so --team
+  // would only 400, and it has no quote token to spend.
+  generate
+    .command('draft-final <draftId>')
+    .description('Render the native 1080p FINAL of a Seedance 2.5 draft (a `generate video --draft` run): the same shot — prompt, references, duration, ratio, seed, audio — as a new run. Bills what a direct 1080p render costs; price it first with `genfire cost draft-final <draftId>`. Within 7 days of the draft')
+    .option('-o, --output <path>', 'Where to save the output. Single file path or directory; defaults to cwd')
+    .option('--no-download', "Don't download outputs locally; only print the URLs")
+    .option('--no-wait', "Don't wait for the run to finish; print the queued run and exit")
+    .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
+    .option('--wait-interval <duration>', 'Polling interval while waiting', '2s')
+    .option('--project <projectId>', 'File the result into this project when it completes')
+    .action(async (draftId: string, opts: CommonGenerateOptions) => {
+      const path = draftFinalPath(draftId);
+      const client = await createClient();
+      // Brand-new endpoint: not on the pinned SDK yet (see publicApiRequest).
+      const run = await publicApiRequest<{ id: string }>('POST', path, {
+        body: opts.project ? { project_id: opts.project } : {},
+        idempotencyKey: randomUUID()
+      });
       await maybeFinish(client, run.id, 'video', opts);
     });
 

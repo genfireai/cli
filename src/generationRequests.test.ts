@@ -5,6 +5,7 @@ import {
   buildImageRequest,
   buildSpeechExtras,
   buildVideoRequest,
+  draftFinalPath,
   parseLoraSpecs,
   parseMultiPrompt,
   validateVideoFlags
@@ -18,7 +19,7 @@ import { registerCostCommand } from './commands/cost.js';
 // drive the real commander wiring for both commands against a stubbed fetch
 // and require the two bodies to be identical apart from `prompt`.
 
-interface Captured { url: string; method: string; body: any }
+interface Captured { url: string; method: string; body: any; headers?: Record<string, string> }
 
 const passthrough = async (input: string) => (input.startsWith('http') ? input : `https://cdn.example/${input}`);
 
@@ -32,15 +33,17 @@ async function runCli(argv: string[]): Promise<Captured[]> {
   const run = { id: 'run_1', object: 'run', status: 'queued', capability: 'video_generation', endpoint: 'x', created_at: '2026-01-01T00:00:00Z' };
   globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
     const method = String(init.method || 'GET');
-    calls.push({ url: String(url), method, body: init.body === undefined ? undefined : JSON.parse(String(init.body)) });
+    calls.push({ url: String(url), method, body: init.body === undefined ? undefined : JSON.parse(String(init.body)), headers: (init.headers ?? {}) as Record<string, string> });
     const path = new URL(String(url)).pathname.replace(/^\/v1/, '');
     let payload: unknown = { object: 'list', data: [] };
     if (path === '/models/estimate-cost') {
       payload = { object: 'cost_estimate', model: 'm', capability: 'c', credits: 1, unit: 'total', breakdown: {} };
     } else if (path === '/account/credits') {
       payload = { account_id: 'a', balance: 10, currency: 'credits' };
-    } else if (path.startsWith('/runs/') || path.endsWith('/generations')) {
+    } else if (path.startsWith('/runs/') || path.endsWith('/generations') || path.endsWith('/final')) {
       payload = run;
+    } else if (path.endsWith('/final/estimate')) {
+      payload = { object: 'cost_estimate', model: 'video.seedance_2_5', capability: 'video_generation', credits: 470, unit: 'total', breakdown: {}, expires_at: '2026-10-12T12:00:00.000Z' };
     } else if (path === '/models') {
       payload = { object: 'list', data: [
         { id: 'image.default_one', capability: 'image_generation', is_default: true },
@@ -277,4 +280,36 @@ test('speech extras: influencer mention by id or @handle; text XOR dialogue', as
   assert.deepEqual(await buildSpeechExtras('hi', { influencer: '@maya' }), { mention: { handle: 'maya' } });
   assert.deepEqual(await buildSpeechExtras('hi', { influencer: 'inf_1', stability: '0.3' }), { mention: { influencer_id: 'inf_1' }, stability: 0.3 });
   await assert.rejects(buildSpeechExtras(undefined, {}), /--dialogue-file/);
+});
+
+test('--draft rides generate AND cost identically, and is absent without the flag', async () => {
+  const flags = ['-m', 'video.seedance_2_5', '-d', '10', '--draft'];
+  const gen = bodyOf(await runCli(['generate', 'video', 'a lighthouse', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', 'a lighthouse', ...flags]), '/models/estimate-cost');
+  const { prompt: _prompt, ...genRest } = gen;
+  assert.deepEqual(genRest, est);
+  assert.equal(est.draft, true);
+  const plain = bodyOf(await runCli(['cost', 'video', 'x', '-m', 'video.seedance_2_5']), '/models/estimate-cost');
+  assert.equal('draft' in plain, false);
+});
+
+test('draft-final renders and prices the draft by id, keyed, with --project filed', async () => {
+  const calls = await runCli(['generate', 'draft-final', 'run_draft1', '--no-wait', '--project', 'proj_1']);
+  const final = calls.find((c) => c.method === 'POST' && c.url.endsWith('/videos/generations/run_draft1/final'));
+  assert.ok(final, `saw ${calls.map((c) => `${c.method} ${c.url}`).join(', ')}`);
+  assert.deepEqual(final!.body, { project_id: 'proj_1' });
+  assert.ok(final!.headers?.['Idempotency-Key'], 'the final is a billable submit and must carry an Idempotency-Key');
+
+  const bare = bodyOf(await runCli(['generate', 'draft-final', 'vid_abc', '--no-wait']), '/videos/generations/vid_abc/final');
+  assert.deepEqual(bare, {});
+
+  const quoted = await runCli(['cost', 'draft-final', 'run_draft1']);
+  assert.ok(quoted.some((c) => c.method === 'POST' && c.url.endsWith('/videos/generations/run_draft1/final/estimate')));
+});
+
+test('draftFinalPath refuses anything that is not an id', () => {
+  assert.equal(draftFinalPath(' run_x1 '), '/videos/generations/run_x1/final');
+  assert.equal(draftFinalPath('vid_9', true), '/videos/generations/vid_9/final/estimate');
+  assert.throws(() => draftFinalPath(''), /run id/);
+  assert.throws(() => draftFinalPath('../runs'), /run id/);
 });
