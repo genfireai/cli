@@ -134,7 +134,7 @@ Model-specific image flags:
 | Flag | Values | Applies to |
 |---|---|---|
 | `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2` only. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. |
-| `--resolution` | `1K` `2K` `4K` | Nano Banana family edit only (`image.nano_banana`, `image.nano_banana_2`, `image.nano_banana_pro`) — supply `--image` or `@<handle>` to route through the edit path. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
+| `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2`, `image.nano_banana_2_1`, `image.nano_banana_pro` (generation and edit); `image.grok_imagine_pro` / `image.grok_imagine_2` take 1K or 2K. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
 
 ### Cost preview
 

@@ -169,7 +169,7 @@ export function addImageRequestOptions(cmd: Command): Command {
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
     .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium')
-    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; nano-banana family edit only — supply -i or @<handle>)')
+    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K)')
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
     .option('--moodboard-strength <level>', `How hard the moodboard steers: ${MOODBOARD_STRENGTHS.join(', ')}`)
     .option('--image-style <id[:scale]>', 'Trained image style (LoRA) from `genfire image-styles list`, optional :scale. Repeat for up to 3. Required by image.flux_lora; also read by the Z-Image Turbo models', collect, [] as string[])
