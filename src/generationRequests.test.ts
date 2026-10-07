@@ -111,6 +111,25 @@ test('generate image and cost image agree, and count is always sent (default 1)'
   assert.equal(est.mask_url, 'https://cdn.example/m.png');
 });
 
+test('Ideogram 4.5: --edit-precision reaches both bodies as edit_precision, identically', async () => {
+  const flags = [
+    '-m', 'image.ideogram_v4_5', '-q', 'high', '-r', '2K', '-a', '4:5',
+    '-i', 'https://cdn.example/poster.png', '-i', 'https://cdn.example/ref.png', '--edit-precision', 'HIGH'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'image', 'make the headline say "SALE"', ...flags, '--no-wait']), '/images/generations');
+  const est = bodyOf(await runCli(['cost', 'image', 'make the headline say "SALE"', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'make the headline say "SALE"');
+  assert.deepEqual(genRest, est, 'a quote stays spendable');
+  assert.equal(gen.edit_precision, 'high', 'normalised to lowercase');
+  assert.equal(gen.model, 'image.ideogram_v4_5');
+  assert.deepEqual(gen.image_urls, ['https://cdn.example/poster.png', 'https://cdn.example/ref.png']);
+  // Unset stays unset: the API default ('regular') applies and other models never see the key.
+  const plain = bodyOf(await runCli(['generate', 'image', 'a logo', '-m', 'image.ideogram_v4_5', '--no-wait']), '/images/generations');
+  assert.equal('edit_precision' in plain, false);
+  await assert.rejects(buildImageRequest({ editPrecision: 'max' }, passthrough), /--edit-precision must be one of: regular, high/);
+});
+
 test('an @element handle in an image prompt no longer dies as an unknown influencer', async () => {
   const calls = await runCli(['generate', 'image', '@bottle on marble', '-m', 'image.nano_banana_2', '--no-wait']);
   const gen = bodyOf(calls, '/images/generations');

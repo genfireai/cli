@@ -134,6 +134,9 @@ async function buildGrounding(opts: GroundingFlags, resolveMedia: MediaResolver)
 
 export const IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto'] as const;
 export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const;
+// Ideogram 4.5 edits only (image.ideogram_v4_5). The API rejects it on every
+// other model and without a source image, so the CLI checks the value only.
+export const IMAGE_EDIT_PRECISIONS = ['regular', 'high'] as const;
 const MOODBOARD_STRENGTHS = ['subtle', 'balanced', 'strong'] as const;
 const Z_IMAGE_CONTROL_MODES = ['none', 'canny', 'depth', 'pose'] as const;
 const Z_IMAGE_TILING_MODES = ['both', 'horizontal', 'vertical'] as const;
@@ -146,6 +149,7 @@ export interface ImageFlags extends GroundingFlags {
   mask?: string;
   quality?: string;
   resolution?: string;
+  editPrecision?: string;
   moodboard?: string;
   moodboardStrength?: string;
   imageStyle?: string[];
@@ -163,13 +167,14 @@ export function addImageRequestOptions(cmd: Command): Command {
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option(
       '-i, --image <urlOrPath>',
-      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3)',
+      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3; Ideogram 4.5 = the source plus up to 4 references)',
       collect,
       [] as string[]
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
-    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium')
-    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K)')
+    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 takes low, medium or high (default medium)')
+    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price)')
+    .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
     .option('--moodboard-strength <level>', `How hard the moodboard steers: ${MOODBOARD_STRENGTHS.join(', ')}`)
     .option('--image-style <id[:scale]>', 'Trained image style (LoRA) from `genfire image-styles list`, optional :scale. Repeat for up to 3. Required by image.flux_lora; also read by the Z-Image Turbo models', collect, [] as string[])
@@ -201,6 +206,7 @@ export function validateImageFlags(opts: ImageFlags): void {
     throw new CliError('--moodboard-strength needs --moodboard.', 'invalid_option');
   }
   oneOf(opts.moodboardStrength, MOODBOARD_STRENGTHS, '--moodboard-strength');
+  oneOf(opts.editPrecision, IMAGE_EDIT_PRECISIONS, '--edit-precision');
   oneOf(opts.controlMode, Z_IMAGE_CONTROL_MODES, '--control-mode');
   oneOf(opts.tilingMode, Z_IMAGE_TILING_MODES, '--tiling-mode');
   num(opts.strength, '--strength', { min: 0, max: 1 });
@@ -228,6 +234,7 @@ export async function buildImageRequest(opts: ImageFlags, resolveMedia: MediaRes
     mask_url: opts.mask ? await resolveMedia(opts.mask) : undefined,
     quality: opts.quality,
     resolution: opts.resolution,
+    edit_precision: opts.editPrecision?.trim().toLowerCase(),
     moodboard_id: opts.moodboard,
     moodboard_strength: opts.moodboardStrength?.trim().toLowerCase(),
     loras: parseLoraSpecs(opts.imageStyle, '--image-style', 3),

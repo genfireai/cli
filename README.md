@@ -133,8 +133,11 @@ Model-specific image flags:
 
 | Flag | Values | Applies to |
 |---|---|---|
-| `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2` only. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. |
-| `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2`, `image.nano_banana_2_1`, `image.nano_banana_pro` (generation and edit); `image.grok_imagine_pro` / `image.grok_imagine_2` take 1K or 2K. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. |
+| `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2`. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. `image.ideogram_v4_5` takes `low` `medium` `high` (default `medium`), each tier priced on its own. |
+| `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2`, `image.nano_banana_2_1`, `image.nano_banana_pro` (generation and edit); `image.grok_imagine_pro` / `image.grok_imagine_2` take 1K or 2K. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. `image.ideogram_v4_5` takes 1K or 2K (default 2K) at the same price. |
+| `--edit-precision` | `regular` `high` | `image.ideogram_v4_5` edits only (needs `-i`). `high` is Ideogram's Precise Edit: it changes only what the prompt names and keeps every other pixel intact, at the same price. Default `regular`. |
+
+Ideogram 4.5 (`image.ideogram_v4_5`) is built for posters, logos and designs where the lettering has to come out exactly right: put the exact on-image text in quotes, early in the prompt. For an edit, the first `-i` is the source and up to 4 more are references (3 when you also pass `--mask`).
 
 ### Cost preview
 
