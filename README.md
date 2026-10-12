@@ -135,7 +135,7 @@ The `--ref-image`, `--ref-video`, `--ref-audio` and `--ref-video-trim` flags tak
 
 **Genjudo** (`-m video.seedance_2_5 --task reference|editing|extension` with a `--ref-video`) follows the web Genjudo:
 
-- `--task reference` (motion transfer) with one clip and no `-a`/`-d` matches the clip — its frame and its measured length (measured for free first).
+- `--task reference` (motion transfer) with one clip and no `-a`/`-d` matches the clip — its frame and its measured length, rounded up to a whole second, 4–30 s (measured for free first).
 - `--task editing` and `--task extension` take exactly one clip; an edit needs at least 4 s of it, and its output follows the source, so leave `-a` and `-d` off.
 - Clips are 2–30 s each and 30 s across the whole `--ref-video` pool.
 - `reference` and `editing` keep the clip's own sound by default: the clip goes in silent and its original audio is laid back on the result. Pass `--no-keep-clip-audio` for a generated soundtrack (add `--no-audio` for none). `extension` always generates sound for the new seconds (`--keep-clip-audio` has no effect there).

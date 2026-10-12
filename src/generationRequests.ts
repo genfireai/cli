@@ -426,7 +426,7 @@ export function addVideoRequestOptions(cmd: Command): Command {
   cmd
     .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1 (default: the API default video model)')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). Genjudo runs (video.seedance_2_5 with a --ref-video, any --task) default to auto: the clip\'s own frame — the API applies the same default to a one-clip run')
-    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded down when the clip\'s sound is kept, up otherwise, 4-30 — the same default the API applies')
+    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
     .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
     .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
@@ -671,35 +671,19 @@ function genjudoDefaultTask(opts: VideoFlags): 'reference' | 'editing' | undefin
 }
 
 /**
- * Whether the clip's own sound is kept, mirroring the web Genjudo and the API.
- * An explicit flag wins (and `--no-audio` alone is the web's "Silent" choice,
- * a caller-set generate_audio the API's default does not override). Otherwise
- * it is the API's one-clip default, under the API's conditions: exactly one
- * clip, reference / editing, no --ref-audio, and a clip that HAS a soundtrack
- * (`clip.hasAudio === false` turns it off; unknown is assumed to have one).
- */
-export function resolveKeepClipAudio(opts: VideoFlags, clip: { hasAudio?: boolean | null } = {}): boolean {
-  const task = genjudoTask(opts);
-  if (!task || task === 'extension') return false;
-  if (opts.keepClipAudio !== undefined) return opts.keepClipAudio;
-  if (opts.audio === false) return false;
-  if (!genjudoDefaultTask(opts) || opts.refAudio?.length) return false;
-  return clip.hasAudio !== false;
-}
-
-/**
  * "Match the clip" length — the web's gediAutoDurationSeconds and the API's:
- * the clip's seconds rounded UP, or DOWN when its own sound is laid back on
- * (the restored track ends with the clip, so a rounded-up render ended on
- * silence), clamped to what one pass renders (4-30).
+ * the clip's seconds rounded UP, clamped to what one pass renders (4-30),
+ * whether or not its own sound is laid back on. A run that follows the clip
+ * renders a whole-second length the provider picks (live 2026-10-12: a 4.5 s
+ * window rendered 5.06 s), so rounding up bills what renders. Trade-off: a
+ * kept soundtrack can end up to a second before the last frame.
  */
-export function matchClipSeconds(clipSeconds: number, keepSound: boolean): number {
+export function matchClipSeconds(clipSeconds: number): number {
   // Capped and rounded to the millisecond FIRST, exactly like the backend
-  // (referenceVideoTrim seedance25FollowSourceBillableSeconds): a 0.2–8.2
-  // window is 7.999… in floats, and flooring that sent 7 for an 8 s bill.
+  // (referenceVideoTrim seedance25FollowSourceBillableSeconds): a 1.1–16.1
+  // window is 15.000…2 in floats, and ceiling that would send 16 for a 15 s clip.
   const clip = Math.round(Math.min(clipSeconds, GENJUDO_MAX_SECONDS) * 1000) / 1000;
-  const whole = keepSound ? Math.floor(clip) : Math.ceil(clip);
-  return Math.min(GENJUDO_MAX_SECONDS, Math.max(GENJUDO_MIN_SECONDS, whole));
+  return Math.min(GENJUDO_MAX_SECONDS, Math.max(GENJUDO_MIN_SECONDS, Math.ceil(clip)));
 }
 
 /**
@@ -768,7 +752,7 @@ async function genjudoFields(
     }
     const trim = trims.find((t) => t.index === 0);
     const seconds = trim ? Math.max(0, Math.min(trim.end, full) - Math.min(trim.start, full)) : full;
-    fields.duration = matchClipSeconds(seconds, resolveKeepClipAudio(opts, { hasAudio: probe?.hasAudio }));
+    fields.duration = matchClipSeconds(seconds);
     fields.follow_source = true;
   }
   return fields;

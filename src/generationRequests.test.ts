@@ -14,7 +14,6 @@ import {
   parseLoraSpecs,
   parseMultiPrompt,
   recoverTrailingPrompt,
-  resolveKeepClipAudio,
   validateVideoFlags,
   VIDEO_VARIADIC_FLAGS,
   videoEstimateCount
@@ -500,18 +499,18 @@ test('--task reference with one clip and no -a/-d matches the clip, keeps its so
   const { prompt: _p, ...genRest } = gen;
   assert.deepEqual(genRest, est, 'quote parity');
   assert.equal(est.aspect_ratio, 'auto');
-  assert.equal(est.duration, 7, 'rounded DOWN: the restored track ends with the clip');
+  assert.equal(est.duration, 8, 'rounded UP with the sound kept too: it bills what renders');
   assert.equal(est.follow_source, true);
   assert.equal(est.keep_source_audio, true);
   assert.equal(est.generate_audio, false);
 });
 
-test('Match the clip: a trim window is what is measured; generated sound rounds up; -a / -d opt out', async () => {
+test('Match the clip: a trim window is what is measured; every sound choice rounds up; -a / -d opt out', async () => {
   inspectSeconds = 7.4;
   const clip = ['-m', 'video.seedance_2_5', '--task', 'reference', '--ref-video', 'https://cdn.example/dance.mp4'];
   const trimmed = bodyOf(await runCli(['cost', 'video', ...clip, '--ref-video-trim', '0:1-6.5']), '/models/estimate-cost');
-  assert.equal(trimmed.duration, 5);
-  // 0.2–8.2 is 7.999… s in floats: rounded to the millisecond first, so 8 (what the API bills), not 7.
+  assert.equal(trimmed.duration, 6, 'a 5.5 s window with the clip\'s sound kept renders (and bills) 6 s');
+  // 0.2–8.2 is 7.999… s in floats: rounded to the millisecond first, so 8 (what the API bills).
   inspectSeconds = 12;
   const window = bodyOf(await runCli(['cost', 'video', ...clip, '--ref-video-trim', '0:0.2-8.2']), '/models/estimate-cost');
   assert.equal(window.duration, 8);
@@ -532,28 +531,18 @@ test('Match the clip: a trim window is what is measured; generated sound rounds 
   inspectSeconds = 7.4;
 });
 
-test('clip sound per task mirrors the web Genjudo: reference + editing keep it, extension and --no-audio do not', () => {
-  const base = { model: 'video.seedance_2_5', refVideo: ['a.mp4'] };
-  assert.equal(resolveKeepClipAudio({ ...base, task: 'reference' }), true);
-  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing' }), true);
-  assert.equal(resolveKeepClipAudio({ ...base, task: 'extension' }), false);
-  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing', keepClipAudio: false }), false);
-  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing', audio: false }), false, '--no-audio alone is Silent');
-  assert.equal(resolveKeepClipAudio({ ...base }), true, 'no --task runs as reference');
-  assert.equal(resolveKeepClipAudio({ ...base, keepClipAudio: true }), true);
-  assert.equal(resolveKeepClipAudio({ model: 'video.veo_3_1', refVideo: ['a.mp4'], task: 'editing' }), false);
-  assert.equal(resolveKeepClipAudio({ ...base, refVideo: ['a.mp4', 'b.mp4'] }), false, 'two clips: no API default');
-  assert.equal(resolveKeepClipAudio({ ...base, refVideo: ['a.mp4', 'b.mp4'], keepClipAudio: true }), true, 'explicit wins');
-  assert.equal(resolveKeepClipAudio({ ...base, refAudio: ['v.mp3'] }), false, 'reference audio: no default');
-  assert.equal(resolveKeepClipAudio({ ...base }, { hasAudio: false }), false, 'a silent clip: no default');
-  assert.equal(resolveKeepClipAudio({ ...base, keepClipAudio: true }, { hasAudio: false }), true);
-  assert.equal(matchClipSeconds(12.9, true), 12);
-  // Millisecond rounding first, like the backend: 8.2 − 0.2 is 7.999… in floats.
-  assert.equal(matchClipSeconds(8.2 - 0.2, true), 8);
-  assert.equal(matchClipSeconds(8.2 - 0.2, false), 8);
-  assert.equal(matchClipSeconds(30.0004, false), 30);
-  assert.equal(matchClipSeconds(12.1, false), 13);
-  assert.equal(matchClipSeconds(45, false), 30);
+test('matchClipSeconds rounds UP whatever the sound, to the millisecond first, clamped to 4-30', () => {
+  assert.equal(matchClipSeconds(7.4), 8, 'a kept-sound 7.4 s clip bills 8, never 7');
+  assert.equal(matchClipSeconds(4.5), 5, 'live 2026-10-12: a 4.5 s window rendered 5.06 s');
+  assert.equal(matchClipSeconds(12.9), 13);
+  assert.equal(matchClipSeconds(12.1), 13);
+  // Millisecond rounding first, like the backend: float noise never adds a second.
+  assert.equal(matchClipSeconds(8.2 - 0.2), 8);
+  assert.equal(matchClipSeconds(16.1 - 1.1), 15);
+  assert.equal(matchClipSeconds(8.0000001), 8);
+  assert.equal(matchClipSeconds(30.0004), 30);
+  assert.equal(matchClipSeconds(2.1), 4);
+  assert.equal(matchClipSeconds(45), 30);
 });
 
 test('editing sends the clip-sound fields and auto frame, but never follow_source or a measured length', async () => {
@@ -576,13 +565,13 @@ test('the CLI fills the one-clip defaults under exactly the API\'s conditions', 
   for (const key of ['aspect_ratio', 'duration', 'follow_source', 'keep_source_audio', 'generate_audio']) assert.equal(key in two, false, `two clips: no ${key}`);
   const twoKept = await bothBodies(['-m', 'video.seedance_2_5', '--ref-video', 'https://cdn.example/a.mp4', '--ref-video', 'https://cdn.example/b.mp4', '--keep-clip-audio', '-d', '6']);
   assert.equal(twoKept.keep_source_audio, true, 'an explicit flag is still sent');
-  // A --ref-audio voice: the clip's sound is not kept, so the match rounds UP.
+  // A --ref-audio voice: the clip's sound is not kept; the match rounds UP as always.
   const voiced = await bothBodies([...SD25_CLIP, '--ref-audio', 'https://cdn.example/voice.mp3']);
   assert.equal('keep_source_audio' in voiced, false);
   assert.equal('generate_audio' in voiced, false);
   assert.equal(voiced.duration, 8);
   assert.equal(voiced.follow_source, true);
-  // A clip with no soundtrack: nothing to keep, generated sound, rounded UP.
+  // A clip with no soundtrack: nothing to keep, generated sound, still rounded UP.
   inspectHasAudio = false;
   const mute = await bothBodies(SD25_CLIP);
   assert.equal('keep_source_audio' in mute, false);
@@ -600,7 +589,7 @@ test('the CLI fills the one-clip defaults under exactly the API\'s conditions', 
   assert.equal(portrait.keep_source_audio, true);
   // `-a auto` still follows.
   const auto = await bothBodies([...SD25_CLIP, '-a', 'auto']);
-  assert.equal(auto.duration, 7);
+  assert.equal(auto.duration, 8);
   assert.equal(auto.follow_source, true);
   // An unreadable clip on an edit: the sound is left to the API (same rule, its own probe).
   inspectSeconds = null;
@@ -683,7 +672,7 @@ test('no --task: the clip\'s sound is kept by default and the clip is matched, e
   assert.equal(none.keep_source_audio, true);
   assert.equal(none.generate_audio, false);
   assert.equal(none.aspect_ratio, 'auto');
-  assert.equal(none.duration, 7);
+  assert.equal(none.duration, 8);
   assert.equal(none.follow_source, true);
 });
 
@@ -697,7 +686,7 @@ test('no --task: --keep-clip-audio and --no-keep-clip-audio take effect in the b
   const generated = await bothBodies([...SD25_CLIP, '--no-keep-clip-audio']);
   assert.equal(generated.keep_source_audio, false, 'the opt-out is explicit: the API defaults a one-clip run to the clip\'s sound');
   assert.equal('generate_audio' in generated, false);
-  assert.equal(generated.duration, 8, 'rounded UP when the model makes the sound');
+  assert.equal(generated.duration, 8, 'rounded UP, the same as with the clip\'s sound kept');
 });
 
 test('--task editing keeps the sound in the body; --task extension never does', async () => {
