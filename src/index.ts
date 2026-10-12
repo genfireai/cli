@@ -2,8 +2,7 @@
 
 import { registerRuntimeCommands } from './commands/runtime.js';
 import { Command } from 'commander';
-import { GenFireApiError } from '@genfire/sdk';
-import { CliError } from './errors.js';
+import { formatError } from './errors.js';
 import { setGlobalFlags } from './output.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerAccountCommand } from './commands/account.js';
@@ -120,37 +119,9 @@ async function main(): Promise<void> {
 }
 
 function reportError(err: unknown): void {
-  if (err instanceof CliError) {
-    process.stderr.write(`Error (${err.code}): ${err.message}\n`);
-    // Commands on `publicApiRequest` (endpoints the pinned SDK lacks) surface
-    // API errors as CliError, so the stale-token hint below has to live here too.
-    if (err.code === 'insufficient_scope') {
-      process.stderr.write(
-        'This token was issued without that scope. Run `genfire auth login` to re-authenticate ' +
-        'with the current scope set.\n'
-      );
-    }
-    process.exit(err.exitCode);
-  }
-  if (err instanceof GenFireApiError) {
-    process.stderr.write(`API error ${err.status} (${err.code}): ${err.message}\n`);
-    // Tokens are minted with the scope set the CLI requested at login time, so a
-    // token issued by an older CLI lacks scopes newer commands need (webhooks,
-    // social, …). Re-authenticating re-mints it with the current defaults.
-    if (err.code === 'insufficient_scope') {
-      process.stderr.write(
-        'This token was issued without that scope. Run `genfire auth login` to re-authenticate ' +
-        'with the current scope set.\n'
-      );
-    }
-    process.exit(1);
-  }
-  if (err instanceof Error) {
-    process.stderr.write(`Error: ${err.message}\n`);
-    process.exit(1);
-  }
-  process.stderr.write(`Unknown error: ${String(err)}\n`);
-  process.exit(1);
+  const { lines, exitCode } = formatError(err);
+  for (const line of lines) process.stderr.write(`${line}\n`);
+  process.exit(exitCode);
 }
 
 main().catch(reportError);

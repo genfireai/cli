@@ -4,7 +4,7 @@ import { createClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { bold, cyan, dim, green, printResult, printTable, red, yellow } from '../output.js';
 import { join } from 'node:path';
-import { downloadOutputs, extractOutputUrls, waitForRun } from '../runHelpers.js';
+import { downloadOutputs, extractOutputUrls, lastFrameUrlOf, waitForRun } from '../runHelpers.js';
 
 function statusColor(status: string): string {
   if (status === 'completed') return green(status);
@@ -121,6 +121,9 @@ export function registerRunsCommand(program: Command): void {
           if (run.model) process.stdout.write(`${dim('Model:')}      ${run.model}\n`);
           process.stdout.write(`${dim('Created:')}    ${run.created_at}\n`);
           if (run.completed_at) process.stdout.write(`${dim('Completed:')}  ${run.completed_at}\n`);
+          // A video's final-frame still — pass it as --image to chain the next shot.
+          const lastFrame = lastFrameUrlOf(run);
+          if (lastFrame) process.stdout.write(`${dim('Last frame:')} ${lastFrame}\n`);
           if (run.error) {
             process.stdout.write(`${red('Error:')}      ${run.error.code}: ${run.error.message}\n`);
           }

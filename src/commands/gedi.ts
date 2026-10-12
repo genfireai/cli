@@ -10,11 +10,17 @@ import { bold, cyan, dim, printResult, printTable } from '../output.js';
  * with a different `--task`:
  *
  *   --task reference  MOTION TRANSFER. The clip supplies the motion, your
- *                     images supply who performs it. Aspect + duration yours.
+ *                     images supply who performs it. Without -a / -d it
+ *                     matches the clip's frame and measured length, like the
+ *                     web Genjudo's "Match the clip".
  *   --task editing    VIDEO EDIT. The clip itself is re-lit / swapped / cleaned
  *                     up. The output follows the SOURCE, so aspect and duration
- *                     are coerced to auto — don't pass them.
- *   --task extension  Continue the clip past its last frame.
+ *                     are coerced to auto — don't pass them. ONE clip, 4-30s.
+ *   --task extension  Continue the clip past its last frame. ONE clip.
+ *
+ * reference and editing keep the clip's own sound by default (the clip goes in
+ * silent, its audio is laid back on the result) — `--no-keep-clip-audio` opts
+ * out. generationRequests.ts owns all of it; this file only prints recipes.
  *
  * What this command adds is the RECIPE BOOK. Every preset here carries a prompt
  * already written in the `@Video1` / `@Image1` citation idiom the model binds
@@ -132,8 +138,9 @@ export function registerGediCommand(program: Command): void {
         process.stdout.write(
           `\n${dim('Full prompt for one preset:')} ${cyan('genfire genjudo presets --json')}\n`
           + `${dim('Run an edit:')} ${cyan('genfire generate video "<preset prompt>" -m video.seedance_2_5 --task editing --ref-video ./take.mp4 --ref-image ./new-product.png')}\n`
-          + `${dim('Run a transfer:')} ${cyan('genfire generate video "<preset prompt>" -m video.seedance_2_5 --task reference --ref-video ./dance.mp4 --ref-image ./character.png -a 9:16 -d 6')}\n`
-          + `${dim('An editing run follows the source clip — leave -a and -d off.')}\n`
+          + `${dim('Run a transfer:')} ${cyan('genfire generate video "<preset prompt>" -m video.seedance_2_5 --task reference --ref-video ./dance.mp4 --ref-image ./character.png')}\n`
+          + `${dim('A transfer matches the clip\'s frame and length unless you pass -a / -d. An editing run follows its source clip (one clip, 4-30s) — leave -a and -d off.')}\n`
+          + `${dim('Both keep the clip\'s own sound (laid back on the result); --no-keep-clip-audio lets the model make the soundtrack.')}\n`
         );
       });
     });

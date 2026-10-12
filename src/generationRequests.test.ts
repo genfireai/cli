@@ -1,14 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Command } from 'commander';
 import {
   buildImageRequest,
   buildSpeechExtras,
   buildVideoRequest,
   draftFinalPath,
+  looksLikePrompt,
+  matchClipSeconds,
   parseLoraSpecs,
   parseMultiPrompt,
-  validateVideoFlags
+  recoverTrailingPrompt,
+  resolveKeepClipAudio,
+  validateVideoFlags,
+  VIDEO_VARIADIC_FLAGS,
+  videoEstimateCount
 } from './generationRequests.js';
 import { registerGenerateCommands } from './commands/generate.js';
 import { registerCostCommand } from './commands/cost.js';
@@ -23,6 +32,11 @@ interface Captured { url: string; method: string; body: any; headers?: Record<st
 
 const passthrough = async (input: string) => (input.startsWith('http') ? input : `https://cdn.example/${input}`);
 
+/** What the stubbed `POST /media/inspect` measures every clip at (null = unreadable). */
+let inspectSeconds: number | null = 7.4;
+/** What the inspect mock says about the clip's soundtrack (the API returns a boolean). */
+let inspectHasAudio: boolean | undefined = true;
+
 async function runCli(argv: string[]): Promise<Captured[]> {
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.GENFIRE_API_KEY;
@@ -33,10 +47,29 @@ async function runCli(argv: string[]): Promise<Captured[]> {
   const run = { id: 'run_1', object: 'run', status: 'queued', capability: 'video_generation', endpoint: 'x', created_at: '2026-01-01T00:00:00Z' };
   globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
     const method = String(init.method || 'GET');
+    // The storage PUT carries the file's bytes, not JSON.
+    if (method === 'PUT') {
+      calls.push({ url: String(url), method, body: undefined, headers: (init.headers ?? {}) as Record<string, string> });
+      return new Response('', { status: 200 });
+    }
     calls.push({ url: String(url), method, body: init.body === undefined ? undefined : JSON.parse(String(init.body)), headers: (init.headers ?? {}) as Record<string, string> });
     const path = new URL(String(url)).pathname.replace(/^\/v1/, '');
     let payload: unknown = { object: 'list', data: [] };
-    if (path === '/models/estimate-cost') {
+    if (path === '/uploads') {
+      const req = calls[calls.length - 1].body;
+      payload = {
+        asset_id: `asset_${req.filename}`,
+        upload_url: `https://storage.example/put/${encodeURIComponent(req.filename)}`,
+        asset_url: `https://cdn.example/uploads/${encodeURIComponent(req.filename)}`,
+        content_type: req.content_type ?? 'application/octet-stream',
+        expires_at: '2026-10-20T00:00:00.000Z'
+      };
+    } else if (path === '/media/inspect') {
+      if (inspectSeconds === null) {
+        return new Response(JSON.stringify({ status: 422, code: 'media_unreadable', detail: 'Could not read the media at that URL' }), { status: 422, headers: { 'Content-Type': 'application/json' } });
+      }
+      payload = { object: 'media_inspection', durationSeconds: inspectSeconds, width: 1080, height: 1920, ...(inspectHasAudio === undefined ? {} : { hasAudio: inspectHasAudio }) };
+    } else if (path === '/models/estimate-cost') {
       payload = { object: 'cost_estimate', model: 'm', capability: 'c', credits: 1, unit: 'total', breakdown: {} };
     } else if (path === '/account/credits') {
       payload = { account_id: 'a', balance: 10, currency: 'credits' };
@@ -81,7 +114,7 @@ test('generate video and cost video send the same body for the same flags (quote
     '--ref-image', 'https://cdn.example/a.png',
     '--ref-video', 'https://cdn.example/clip.mp4',
     '--ref-video-trim', '0:1-6',
-    '--task', 'editing', '--bitrate', 'high', '--no-audio'
+    '--task', 'editing', '--bitrate', 'standard', '--no-audio'
   ];
   const gen = bodyOf(await runCli(['generate', 'video', 'relight @Video1', ...flags, '--no-wait']), '/videos/generations');
   const est = bodyOf(await runCli(['cost', 'video', 'relight @Video1', ...flags]), '/models/estimate-cost');
@@ -89,6 +122,8 @@ test('generate video and cost video send the same body for the same flags (quote
   assert.equal(prompt, 'relight @Video1');
   assert.deepEqual(genRest, est);
   assert.equal(est.generate_audio, false);
+  // --bitrate has no effect on Seedance 2.5, so neither body carries it.
+  assert.equal('bitrate_mode' in est, false);
   assert.deepEqual(est.reference_video_trims, [{ index: 0, start: 1, end: 6 }]);
   assert.equal(est.task, 'editing');
 });
@@ -331,4 +366,361 @@ test('draftFinalPath refuses anything that is not an id', () => {
   assert.equal(draftFinalPath('vid_9', true), '/videos/generations/vid_9/final/estimate');
   assert.throws(() => draftFinalPath(''), /run id/);
   assert.throws(() => draftFinalPath('../runs'), /run id/);
+});
+
+// ─── A prompt typed after a variadic --ref-* list ────────────────────────────
+// `--ref-image <urlOrPath...>` swallows every following word, so the prompt in
+// `generate video -m video.seedance_2_5 --ref-video a.mov --ref-image me.jpg
+// "make her dance"` landed in the image list: generate died with "missing
+// required argument 'prompt'" and cost tried to upload the prompt as a file.
+
+test('a prompt after --ref-image is recovered, identically on generate and cost', async () => {
+  const flags = ['-m', 'video.seedance_2_5', '-d', '6', '--ref-video', 'https://cdn.example/a.mov', '--ref-image', 'https://cdn.example/me.jpg'];
+  const genCalls = await runCli(['generate', 'video', ...flags, 'make her dance', '--no-wait']);
+  const estCalls = await runCli(['cost', 'video', ...flags, 'make her dance']);
+  const gen = bodyOf(genCalls, '/videos/generations');
+  const est = bodyOf(estCalls, '/models/estimate-cost');
+  assert.equal(gen.prompt, 'make her dance');
+  assert.deepEqual(gen.reference_image_urls, ['https://cdn.example/me.jpg']);
+  const { prompt: _p, ...genRest } = gen;
+  assert.deepEqual(genRest, est, 'quote parity');
+  assert.ok(!estCalls.some((c) => c.url.endsWith('/uploads')), 'cost never uploads the prompt');
+});
+
+test('--ref-image a.jpg b.jpg still takes both files, and a prompt after them is still recovered', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'genfire-refs-'));
+  try {
+    const a = join(dir, 'a.JPG');
+    const b = join(dir, 'b b.png');
+    writeFileSync(a, 'a');
+    writeFileSync(b, 'b');
+    const calls = await runCli(['generate', 'video', '-m', 'video.seedance_2_5', '--ref-image', a, b, 'make them wave', '--no-wait']);
+    const gen = bodyOf(calls, '/videos/generations');
+    assert.equal(gen.prompt, 'make them wave');
+    assert.deepEqual(gen.reference_image_urls, ['https://cdn.example/uploads/a.JPG', 'https://cdn.example/uploads/b%20b.png']);
+    // Typed by extension (any case) — never application/octet-stream.
+    const uploads = calls.filter((c) => c.url.endsWith('/uploads')).map((c) => c.body);
+    // (Uploads run in parallel, so their order is not fixed — the URL order above is.)
+    assert.deepEqual(uploads.map((u) => [u.filename, u.content_type]).sort(), [['a.JPG', 'image/jpeg'], ['b b.png', 'image/png']]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the prompt is recovered from whichever variadic list swallowed it, including trims', async () => {
+  const gen = bodyOf(
+    await runCli(['generate', 'video', '-m', 'video.seedance_2_5', '-d', '5', '--ref-video', 'https://cdn.example/a.mp4', '--ref-video-trim', '0:1-4', 'relight @Video1 at dusk', '--no-wait']),
+    '/videos/generations'
+  );
+  assert.equal(gen.prompt, 'relight @Video1 at dusk');
+  assert.deepEqual(gen.reference_video_trims, [{ index: 0, start: 1, end: 4 }]);
+  await assert.rejects(runCli(['generate', 'video', '-m', 'video.veo_3_1', '--no-wait']), /Missing the prompt/);
+});
+
+test('speech: text after the variadic --audio-url is recovered', async () => {
+  const calls = await runCli(['generate', 'speech', '-m', 'speech.seed_audio_1_0', '--audio-url', 'https://cdn.example/v.mp3', 'Hello @Audio1', '--no-wait']);
+  const body = bodyOf(calls, '/audio/speech');
+  assert.equal(body.text, 'Hello @Audio1');
+  assert.deepEqual(body.audio_urls, ['https://cdn.example/v.mp3']);
+});
+
+test('looksLikePrompt: existing paths, URLs, issued run ids and path-shaped words are media; prose is the prompt', () => {
+  const nothing = () => false;
+  const everything = () => true;
+  assert.equal(looksLikePrompt('make her dance', nothing), true);
+  assert.equal(looksLikePrompt('dance', nothing), true);
+  assert.equal(looksLikePrompt('', nothing), true, 'Recast\'s "" prompt');
+  // One word with an underscore is a prompt unless it is a prefix the API issues.
+  assert.equal(looksLikePrompt('slow_motion', nothing), true);
+  assert.equal(looksLikePrompt('run_abc123', nothing), false);
+  assert.equal(looksLikePrompt('dash_video_abc', nothing), false);
+  // An EXISTING path is media however it is spelled — file or directory, spaces or none.
+  assert.equal(looksLikePrompt('Screen Recording 1.mov', everything), false);
+  assert.equal(looksLikePrompt('My Clips', everything), false);
+  assert.equal(looksLikePrompt('slow_motion', everything), false);
+  // A value that does not exist and has whitespace is prose.
+  assert.equal(looksLikePrompt('My Clips', nothing), true);
+  assert.equal(looksLikePrompt('make her dance to song.mp3', nothing), true);
+  assert.equal(looksLikePrompt('https://cdn.example/a.png', nothing), false);
+  assert.equal(looksLikePrompt('./shots/a', nothing), false);
+  assert.equal(looksLikePrompt('photo.heic', nothing), false);
+});
+
+test('a one-word underscore prompt after --ref-image is recovered, not resolved as a run', async () => {
+  const calls = await runCli(['generate', 'video', '-m', 'video.veo_3_1', '--ref-image', 'https://cdn.example/a.png', 'slow_motion', '--no-wait']);
+  const gen = bodyOf(calls, '/videos/generations');
+  assert.equal(gen.prompt, 'slow_motion');
+  assert.deepEqual(gen.reference_image_urls, ['https://cdn.example/a.png']);
+  assert.ok(!calls.some((c) => c.url.includes('/runs/slow_motion')), 'no run lookup for a prompt');
+});
+
+test('an existing directory with spaces after --ref-image stays media (and fails as "not a file"), never the prompt', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'genfire-dir-'));
+  try {
+    const clips = join(dir, 'My Clips');
+    mkdirSync(clips);
+    await assert.rejects(
+      runCli(['generate', 'video', 'a fox', '-m', 'video.veo_3_1', '--ref-image', clips, '--no-wait']),
+      /Path is not a file/
+    );
+    await assert.rejects(
+      runCli(['generate', 'video', '-m', 'video.veo_3_1', '--ref-image', clips, '--no-wait']),
+      /Missing the prompt/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recoverTrailingPrompt leaves an explicit prompt alone and refuses two candidates', () => {
+  const opts: Record<string, unknown> = { refImage: ['a.png', 'make her dance'] };
+  assert.equal(recoverTrailingPrompt('explicit', opts, VIDEO_VARIADIC_FLAGS, () => false), 'explicit');
+  assert.deepEqual(opts.refImage, ['a.png', 'make her dance'], 'untouched when the positional had one');
+  assert.equal(recoverTrailingPrompt(undefined, opts, VIDEO_VARIADIC_FLAGS, () => false), 'make her dance');
+  assert.deepEqual(opts.refImage, ['a.png']);
+  const only: Record<string, unknown> = { refImage: ['make her dance'] };
+  recoverTrailingPrompt(undefined, only, VIDEO_VARIADIC_FLAGS, () => false);
+  assert.equal(only.refImage, undefined, 'an emptied list is dropped');
+  assert.throws(
+    () => recoverTrailingPrompt(undefined, { refImage: ['a.png', 'one idea'], refAudio: ['b.mp3', 'another idea'] }, VIDEO_VARIADIC_FLAGS, () => false),
+    /read as the prompt/
+  );
+});
+
+// ─── Genjudo: the clip's own sound + "Match the clip" ────────────────────────
+// The web Genjudo keeps the clip's sound by default on Motion and Edit, and its
+// "Match the clip" sends the clip's frame and measured length. The CLI sent the
+// API defaults (a generated soundtrack, 16:9, 5 s) instead.
+
+test('--task reference with one clip and no -a/-d matches the clip, keeps its sound, and quotes what it charges', async () => {
+  inspectSeconds = 7.4;
+  const flags = ['-m', 'video.seedance_2_5', '--task', 'reference', '--ref-video', 'https://cdn.example/dance.mp4', '--ref-image', 'https://cdn.example/me.jpg'];
+  const gen = bodyOf(await runCli(['generate', 'video', 'Transfer the motion in @Video1 onto @Image1', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', ...flags]), '/models/estimate-cost');
+  const { prompt: _p, ...genRest } = gen;
+  assert.deepEqual(genRest, est, 'quote parity');
+  assert.equal(est.aspect_ratio, 'auto');
+  assert.equal(est.duration, 7, 'rounded DOWN: the restored track ends with the clip');
+  assert.equal(est.follow_source, true);
+  assert.equal(est.keep_source_audio, true);
+  assert.equal(est.generate_audio, false);
+});
+
+test('Match the clip: a trim window is what is measured; generated sound rounds up; -a / -d opt out', async () => {
+  inspectSeconds = 7.4;
+  const clip = ['-m', 'video.seedance_2_5', '--task', 'reference', '--ref-video', 'https://cdn.example/dance.mp4'];
+  const trimmed = bodyOf(await runCli(['cost', 'video', ...clip, '--ref-video-trim', '0:1-6.5']), '/models/estimate-cost');
+  assert.equal(trimmed.duration, 5);
+  // 0.2–8.2 is 7.999… s in floats: rounded to the millisecond first, so 8 (what the API bills), not 7.
+  inspectSeconds = 12;
+  const window = bodyOf(await runCli(['cost', 'video', ...clip, '--ref-video-trim', '0:0.2-8.2']), '/models/estimate-cost');
+  assert.equal(window.duration, 8);
+  inspectSeconds = 7.4;
+  const generated = bodyOf(await runCli(['cost', 'video', ...clip, '--no-keep-clip-audio']), '/models/estimate-cost');
+  assert.equal(generated.duration, 8);
+  // Explicit, or the API's one-clip default would put the clip's sound back on.
+  assert.equal(generated.keep_source_audio, false);
+  assert.equal('generate_audio' in generated, false);
+  const fixed = bodyOf(await runCli(['cost', 'video', ...clip, '-a', '9:16', '-d', '6']), '/models/estimate-cost');
+  assert.equal(fixed.aspect_ratio, '9:16');
+  assert.equal(fixed.duration, 6);
+  assert.equal('follow_source' in fixed, false);
+  inspectSeconds = 2.1;
+  assert.equal(bodyOf(await runCli(['cost', 'video', ...clip]), '/models/estimate-cost').duration, 4, 'clamped to one pass');
+  inspectSeconds = null;
+  await assert.rejects(runCli(['cost', 'video', ...clip]), /Could not measure the --ref-video .*Pass -d <seconds>/);
+  inspectSeconds = 7.4;
+});
+
+test('clip sound per task mirrors the web Genjudo: reference + editing keep it, extension and --no-audio do not', () => {
+  const base = { model: 'video.seedance_2_5', refVideo: ['a.mp4'] };
+  assert.equal(resolveKeepClipAudio({ ...base, task: 'reference' }), true);
+  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing' }), true);
+  assert.equal(resolveKeepClipAudio({ ...base, task: 'extension' }), false);
+  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing', keepClipAudio: false }), false);
+  assert.equal(resolveKeepClipAudio({ ...base, task: 'editing', audio: false }), false, '--no-audio alone is Silent');
+  assert.equal(resolveKeepClipAudio({ ...base }), true, 'no --task runs as reference');
+  assert.equal(resolveKeepClipAudio({ ...base, keepClipAudio: true }), true);
+  assert.equal(resolveKeepClipAudio({ model: 'video.veo_3_1', refVideo: ['a.mp4'], task: 'editing' }), false);
+  assert.equal(resolveKeepClipAudio({ ...base, refVideo: ['a.mp4', 'b.mp4'] }), false, 'two clips: no API default');
+  assert.equal(resolveKeepClipAudio({ ...base, refVideo: ['a.mp4', 'b.mp4'], keepClipAudio: true }), true, 'explicit wins');
+  assert.equal(resolveKeepClipAudio({ ...base, refAudio: ['v.mp3'] }), false, 'reference audio: no default');
+  assert.equal(resolveKeepClipAudio({ ...base }, { hasAudio: false }), false, 'a silent clip: no default');
+  assert.equal(resolveKeepClipAudio({ ...base, keepClipAudio: true }, { hasAudio: false }), true);
+  assert.equal(matchClipSeconds(12.9, true), 12);
+  // Millisecond rounding first, like the backend: 8.2 − 0.2 is 7.999… in floats.
+  assert.equal(matchClipSeconds(8.2 - 0.2, true), 8);
+  assert.equal(matchClipSeconds(8.2 - 0.2, false), 8);
+  assert.equal(matchClipSeconds(30.0004, false), 30);
+  assert.equal(matchClipSeconds(12.1, false), 13);
+  assert.equal(matchClipSeconds(45, false), 30);
+});
+
+test('editing sends the clip-sound fields and auto frame, but never follow_source or a measured length', async () => {
+  const flags = ['-m', 'video.seedance_2_5', '--task', 'editing', '--ref-video', 'https://cdn.example/take.mp4'];
+  const gen = bodyOf(await runCli(['generate', 'video', 'relight @Video1', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', 'relight @Video1', ...flags]), '/models/estimate-cost');
+  const { prompt: _p, ...genRest } = gen;
+  assert.deepEqual(genRest, est);
+  assert.equal(est.keep_source_audio, true);
+  assert.equal(est.aspect_ratio, 'auto');
+  for (const key of ['follow_source', 'duration']) assert.equal(key in est, false);
+  const ext = bodyOf(await runCli(['cost', 'video', ...flags.slice(0, 3), 'extension', ...flags.slice(4), '-d', '5']), '/models/estimate-cost');
+  for (const key of ['keep_source_audio', 'follow_source']) assert.equal(key in ext, false);
+});
+
+test('the CLI fills the one-clip defaults under exactly the API\'s conditions', async () => {
+  inspectSeconds = 7.4;
+  inspectHasAudio = true;
+  const two = await bothBodies(['-m', 'video.seedance_2_5', '--ref-video', 'https://cdn.example/a.mp4', '--ref-video', 'https://cdn.example/b.mp4', '--ref-image', 'https://cdn.example/me.jpg']);
+  for (const key of ['aspect_ratio', 'duration', 'follow_source', 'keep_source_audio', 'generate_audio']) assert.equal(key in two, false, `two clips: no ${key}`);
+  const twoKept = await bothBodies(['-m', 'video.seedance_2_5', '--ref-video', 'https://cdn.example/a.mp4', '--ref-video', 'https://cdn.example/b.mp4', '--keep-clip-audio', '-d', '6']);
+  assert.equal(twoKept.keep_source_audio, true, 'an explicit flag is still sent');
+  // A --ref-audio voice: the clip's sound is not kept, so the match rounds UP.
+  const voiced = await bothBodies([...SD25_CLIP, '--ref-audio', 'https://cdn.example/voice.mp3']);
+  assert.equal('keep_source_audio' in voiced, false);
+  assert.equal('generate_audio' in voiced, false);
+  assert.equal(voiced.duration, 8);
+  assert.equal(voiced.follow_source, true);
+  // A clip with no soundtrack: nothing to keep, generated sound, rounded UP.
+  inspectHasAudio = false;
+  const mute = await bothBodies(SD25_CLIP);
+  assert.equal('keep_source_audio' in mute, false);
+  assert.equal(mute.duration, 8);
+  const muteEdit = await bothBodies(['-m', 'video.seedance_2_5', '--task', 'editing', '--ref-video', 'https://cdn.example/take.mp4'], 'relight @Video1');
+  assert.equal('keep_source_audio' in muteEdit, false);
+  assert.equal(muteEdit.aspect_ratio, 'auto');
+  inspectHasAudio = true;
+  // An explicit ratio is the caller's: the CLI fills no length or follow_source for it and leaves the
+  // call to the API — which still follows the clip when the ratio IS the clip's own (a 9:16 phone clip
+  // with -a 9:16) and renders 5 s for any other. Either way cost and generate send the same body.
+  const portrait = await bothBodies([...SD25_CLIP, '-a', '9:16']);
+  assert.equal(portrait.aspect_ratio, '9:16');
+  for (const key of ['duration', 'follow_source']) assert.equal(key in portrait, false);
+  assert.equal(portrait.keep_source_audio, true);
+  // `-a auto` still follows.
+  const auto = await bothBodies([...SD25_CLIP, '-a', 'auto']);
+  assert.equal(auto.duration, 7);
+  assert.equal(auto.follow_source, true);
+  // An unreadable clip on an edit: the sound is left to the API (same rule, its own probe).
+  inspectSeconds = null;
+  const unread = await bothBodies(['-m', 'video.seedance_2_5', '--task', 'editing', '--ref-video', 'https://cdn.example/take.mp4'], 'relight @Video1');
+  for (const key of ['keep_source_audio', 'generate_audio']) assert.equal(key in unread, false);
+  inspectSeconds = 7.4;
+});
+
+test('Seedance 2.5: --image beside reference media is sent as given — the API folds it into the references', async () => {
+  const m = { model: 'video.seedance_2_5', image: 'a.png' };
+  assert.doesNotThrow(() => validateVideoFlags({ ...m, refVideo: ['b.mp4'] }));
+  assert.doesNotThrow(() => validateVideoFlags({ ...m, refImage: ['b.png'] }));
+  // Audio alone is still refused (never the only reference) — before any upload.
+  assert.throws(() => validateVideoFlags({ ...m, refAudio: ['v.mp3'] }), /--ref-audio/);
+  // Same body for cost and generate: the start frame AND the pool both ride.
+  const body = await bothBodies(['-m', 'video.seedance_2_5', '-i', 'https://cdn.example/frame.jpg', '--ref-image', 'https://cdn.example/me.jpg', '-d', '5'], 'she waves at @Image1');
+  assert.equal(body.image_url, 'https://cdn.example/frame.jpg');
+  assert.deepEqual(body.reference_image_urls, ['https://cdn.example/me.jpg']);
+});
+
+test('Genjudo flag validation fails before anything uploads', () => {
+  const g = { model: 'video.seedance_2_5', refVideo: ['a.mp4'] };
+  assert.throws(() => validateVideoFlags({ ...g, task: 'editing', refVideo: ['a.mp4', 'b.mp4'] }), /ONE clip at a time/);
+  assert.throws(() => validateVideoFlags({ ...g, task: 'extension', refVideo: ['a.mp4', 'b.mp4'] }), /ONE clip at a time/);
+  assert.throws(() => validateVideoFlags({ model: 'video.veo_3_1', refVideo: ['a.mp4'], keepClipAudio: true }), /Genjudo option/);
+  assert.throws(() => validateVideoFlags({ model: 'video.seedance_2_5', keepClipAudio: true }), /pass the clip with --ref-video/);
+  assert.doesNotThrow(() => validateVideoFlags({ ...g, task: 'reference', refVideo: ['a.mp4', 'b.mp4'] }));
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.veo_3_1', keepClipAudio: false }));
+});
+
+test('--keep-clip-audio on --task extension has no effect: not refused, and nothing is sent for it', async () => {
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.seedance_2_5', refVideo: ['a.mp4'], task: 'extension', keepClipAudio: true }));
+  const body = await bothBodies(['-m', 'video.seedance_2_5', '--task', 'extension', '--ref-video', 'https://cdn.example/take.mp4', '--keep-clip-audio'], 'continue @Video1');
+  for (const key of ['keep_source_audio', 'generate_audio']) assert.equal(key in body, false, `${key} is not sent on extension`);
+});
+
+test('Seedance 2.5: --bitrate is not refused (and not sent); cost -n > 1 is sent for the API to clamp', async () => {
+  for (const bitrate of ['high', 'standard']) {
+    assert.doesNotThrow(() => validateVideoFlags({ model: 'video.seedance_2_5', bitrate }));
+    const body = await bothBodies(['-m', 'video.seedance_2_5', '--bitrate', bitrate, '-d', '5'], 'a fox runs');
+    assert.equal('bitrate_mode' in body, false, `--bitrate ${bitrate} has no effect on 2.5`);
+  }
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'VIDEO.SEEDANCE_2_5', bitrateMode: 'high' }));
+  // Seedance 2.0 Standard/Fast take it as before.
+  assert.equal((await bothBodies(['-m', 'video.seedance_2_0', '--bitrate', 'high'], 'a fox runs')).bitrate_mode, 'high');
+  // A value that is neither is still a local error.
+  assert.throws(() => validateVideoFlags({ model: 'video.seedance_2_0', bitrate: 'ultra' }), /standard or high/);
+  // Count: sent as given on every model.
+  assert.equal(videoEstimateCount('video.seedance_2_5', '2'), 2);
+  assert.equal(videoEstimateCount('video.seedance_2_5', undefined), undefined);
+  assert.equal(videoEstimateCount('video.veo_3_1', '3'), 3);
+  assert.equal(bodyOf(await runCli(['cost', 'video', 'x', '-m', 'video.seedance_2_5', '-n', '3']), '/models/estimate-cost').count, 3);
+  assert.equal(bodyOf(await runCli(['cost', 'video', 'x', '-m', 'video.veo_3_1', '-n', '3']), '/models/estimate-cost').count, 3);
+});
+
+// ─── Clip sound in the REQUEST BODY, per task (and with no --task) ───────────
+// A video.seedance_2_5 run with a clip and no --task runs as `reference` (the
+// API leaves the task to the model's default), so it must carry the same
+// clip-sound and Match-the-clip fields as an explicit `--task reference` —
+// --keep-clip-audio used to be dropped silently there.
+
+async function bothBodies(flags: string[], prompt = 'Transfer the motion in @Video1 onto @Image1') {
+  const gen = bodyOf(await runCli(['generate', 'video', prompt, ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', prompt, ...flags]), '/models/estimate-cost');
+  const { prompt: _p, ...genRest } = gen;
+  assert.deepEqual(genRest, est, `quote parity for ${flags.join(' ')}`);
+  return est;
+}
+
+const SD25_CLIP = ['-m', 'video.seedance_2_5', '--ref-video', 'https://cdn.example/dance.mp4', '--ref-image', 'https://cdn.example/me.jpg'];
+
+test('no --task: the clip\'s sound is kept by default and the clip is matched, exactly like --task reference', async () => {
+  inspectSeconds = 7.4;
+  const none = await bothBodies(SD25_CLIP);
+  const reference = await bothBodies([...SD25_CLIP, '--task', 'reference']);
+  assert.equal('task' in none, false, 'no task is invented on the wire');
+  const { task, ...referenceRest } = reference;
+  assert.equal(task, 'reference');
+  assert.deepEqual(none, referenceRest);
+  assert.equal(none.keep_source_audio, true);
+  assert.equal(none.generate_audio, false);
+  assert.equal(none.aspect_ratio, 'auto');
+  assert.equal(none.duration, 7);
+  assert.equal(none.follow_source, true);
+});
+
+test('no --task: --keep-clip-audio and --no-keep-clip-audio take effect in the body', async () => {
+  inspectSeconds = 7.4;
+  const kept = await bothBodies([...SD25_CLIP, '--keep-clip-audio', '-d', '6']);
+  assert.equal(kept.keep_source_audio, true);
+  assert.equal(kept.generate_audio, false);
+  assert.equal(kept.duration, 6);
+  assert.equal('follow_source' in kept, false, '-d opts out of Match the clip');
+  const generated = await bothBodies([...SD25_CLIP, '--no-keep-clip-audio']);
+  assert.equal(generated.keep_source_audio, false, 'the opt-out is explicit: the API defaults a one-clip run to the clip\'s sound');
+  assert.equal('generate_audio' in generated, false);
+  assert.equal(generated.duration, 8, 'rounded UP when the model makes the sound');
+});
+
+test('--task editing keeps the sound in the body; --task extension never does', async () => {
+  const take = ['-m', 'video.seedance_2_5', '--ref-video', 'https://cdn.example/take.mp4'];
+  const editing = await bothBodies([...take, '--task', 'editing'], 'relight @Video1');
+  assert.equal(editing.keep_source_audio, true);
+  assert.equal(editing.generate_audio, false);
+  assert.equal(editing.aspect_ratio, 'auto');
+  for (const key of ['follow_source', 'duration']) assert.equal(key in editing, false);
+  const editingGenerated = await bothBodies([...take, '--task', 'editing', '--no-keep-clip-audio'], 'relight @Video1');
+  assert.equal(editingGenerated.keep_source_audio, false);
+  assert.equal('generate_audio' in editingGenerated, false);
+  const extension = await bothBodies([...take, '--task', 'extension', '-d', '5'], 'continue @Video1');
+  // Extension gets none of the one-clip defaults — the API applies none there either.
+  for (const key of ['keep_source_audio', 'follow_source', 'generate_audio', 'aspect_ratio']) assert.equal(key in extension, false);
+  // keep_source_audio has no effect on extension — the opt-out is not sent there either.
+  const extensionOptOut = await bothBodies([...take, '--task', 'extension', '-d', '5', '--no-keep-clip-audio'], 'continue @Video1');
+  assert.equal('keep_source_audio' in extensionOptOut, false);
+  // --no-audio alone already sets generate_audio, which the API reads as the caller's choice.
+  const silent = await bothBodies([...take, '--task', 'editing', '--no-audio'], 'relight @Video1');
+  assert.equal(silent.generate_audio, false);
+  assert.equal('keep_source_audio' in silent, false);
+  // ...nor the opt-in: no effect there, so not refused and nothing is sent.
+  const extensionOptIn = await bothBodies([...take, '--task', 'extension', '-d', '5', '--keep-clip-audio'], 'continue @Video1');
+  for (const key of ['keep_source_audio', 'generate_audio']) assert.equal(key in extensionOptIn, false);
 });

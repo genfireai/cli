@@ -357,7 +357,10 @@ registerSlash({
     const voiceId = flag('--voice-id');
     const negativePrompt = flag('--negative-prompt');
 
-    const imageUrl = imagePath ? (await resolveMediaInput(client, imagePath)).url : undefined;
+    // Upload progress goes to the TUI log, not stderr (which would tear the Ink frame).
+    const imageUrl = imagePath
+      ? (await resolveMediaInput(client, imagePath, { onProgress: (line) => log(line, 'info') })).url
+      : undefined;
 
     const label = `generate ${kind}: ${describe(prompt)}`;
     const jobId = await trackJob(label, async () => {
@@ -581,11 +584,11 @@ registerSlash({
     if (!client) return;
     const response = await client.listVoices();
     if (response.data.length === 0) {
-      log('No cloned voices. Stock voices: genfire voices list --include-stock', 'info');
+      log('No cloned voices. Stock voices: genfire voices list --stock', 'info');
       return;
     }
-    const rows = response.data.map((v) => [v.id, v.name, v.type, v.provider]);
-    log(fmtTable(rows, ['id', 'name', 'type', 'provider']), 'output');
+    const rows = response.data.map((v) => [v.id, v.name, v.type]);
+    log(fmtTable(rows, ['id', 'name', 'type']), 'output');
   }
 });
 

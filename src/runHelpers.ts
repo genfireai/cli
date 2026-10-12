@@ -7,25 +7,79 @@ import { pipeline } from 'node:stream/promises';
 import { publicApiRequest } from './client.js';
 import { CliError } from './errors.js';
 import { dim, green, yellow, printResult } from './output.js';
+import { findExtensionSibling, uploadLocalFile, type UploadLocalFileOptions } from './upload.js';
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_MS = 15 * 60 * 1000;
+/**
+ * `GET /v1/runs/:id?wait=N` holds the request until the run is terminal or N
+ * seconds pass (backend runLongPoll: N clamped to 30, non-numeric → 400
+ * `invalid_wait`). 25 stays under that ceiling and under common proxy idle
+ * timeouts, so a 4.5-minute render is ~11 requests instead of ~135.
+ */
+export const LONG_POLL_WAIT_SECONDS = 25;
 
 export interface WaitOptions {
   intervalMs?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
   onTick?: (run: Run, elapsedMs: number) => void;
+  /** false = plain polling every `intervalMs` (no `?wait=`). Default true. */
+  longPoll?: boolean;
 }
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new Error('Aborted'));
+    }, { once: true });
+  });
+}
+
+type RawGet = <T>(method: 'GET', path: string, options: { query?: Record<string, number>; signal?: AbortSignal }) => Promise<T>;
+
+/**
+ * The SDK client's own request method — same auth, base URL and
+ * GenFireApiError as `getRun`, which on the pinned 0.23.0 takes no `wait`.
+ * TypeScript-private only; null if a future SDK drops it, and the wait then
+ * falls back to plain polling.
+ */
+function sdkRawGet(client: GenFireClient): RawGet | null {
+  const fn = (client as unknown as { request?: unknown }).request;
+  return typeof fn === 'function' ? (fn as RawGet).bind(client) : null;
+}
 
 export async function waitForRun(client: GenFireClient, runId: string, options: WaitOptions = {}): Promise<Run> {
   const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
   const timeoutMs = options.timeoutMs ?? POLL_MAX_MS;
   const startedAt = Date.now();
+  const rawGet = options.longPoll === false ? null : sdkRawGet(client);
+  let longPoll = rawGet !== null;
+  const path = `/runs/${encodeURIComponent(runId)}`;
 
-  // First fetch
+  const read = async (): Promise<Run> => {
+    if (longPoll && rawGet) {
+      // Never hold past the caller's own deadline.
+      const wait = Math.min(LONG_POLL_WAIT_SECONDS, Math.floor((timeoutMs - (Date.now() - startedAt)) / 1000));
+      if (wait >= 1) {
+        try {
+          return await rawGet<Run>('GET', path, { query: { wait }, signal: options.signal });
+        } catch (err) {
+          // An API that rejects `wait` gets plain polling from here on.
+          if (!(err instanceof GenFireApiError && err.status === 400 && err.code === 'invalid_wait')) throw err;
+          longPoll = false;
+        }
+      }
+    }
+    return client.getRun(runId, options.signal);
+  };
+
+  // First read is immediate: a finished run returns at once, and the first
+  // tick shows the real status instead of waiting out a long-poll.
   let run = await client.getRun(runId, options.signal);
   if (TERMINAL_STATUSES.has(run.status)) {
     options.onTick?.(run, 0);
@@ -34,18 +88,25 @@ export async function waitForRun(client: GenFireClient, runId: string, options: 
 
   while (Date.now() - startedAt < timeoutMs) {
     options.onTick?.(run, Date.now() - startedAt);
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, intervalMs);
-      options.signal?.addEventListener('abort', () => {
-        clearTimeout(timer);
-        reject(new Error('Aborted'));
-      }, { once: true });
-    });
-    run = await client.getRun(runId, options.signal);
+    const requestedAt = Date.now();
+    // While a long-poll is held open, keep the elapsed counter moving.
+    const ticker = longPoll && options.onTick
+      ? setInterval(() => options.onTick!(run, Date.now() - startedAt), intervalMs)
+      : null;
+    try {
+      if (!longPoll) await sleep(intervalMs, options.signal);
+      run = await read();
+    } finally {
+      if (ticker) clearInterval(ticker);
+    }
     if (TERMINAL_STATUSES.has(run.status)) {
       options.onTick?.(run, Date.now() - startedAt);
       return run;
     }
+    // A long-poll answered early and unfinished (an API that ignores `wait`)
+    // must not turn into a tight request loop.
+    const spent = Date.now() - requestedAt;
+    if (longPoll && spent < intervalMs) await sleep(intervalMs - spent, options.signal);
   }
 
   throw new CliError(
@@ -159,11 +220,18 @@ export async function waitForCanvasRun(
   );
 }
 
+export type ResolveMediaOptions = UploadLocalFileOptions;
+
 /**
- * Auto-resolves a media flag value: if it's an http(s) URL, return as-is;
- * if it looks like a local path that exists, upload it and return the asset_url.
+ * Auto-resolves a media flag value: an http(s) URL is returned as-is; a local
+ * file is uploaded (typed by extension, see upload.ts) and its asset_url
+ * returned; a completed run's id resolves to that run's output URL.
  */
-export async function resolveMediaInput(client: GenFireClient, value: string): Promise<{ url: string; uploaded?: Upload }> {
+export async function resolveMediaInput(
+  client: GenFireClient,
+  value: string,
+  options: ResolveMediaOptions = {}
+): Promise<{ url: string; uploaded?: Upload }> {
   if (/^https?:\/\//i.test(value)) {
     return { url: value };
   }
@@ -174,29 +242,81 @@ export async function resolveMediaInput(client: GenFireClient, value: string): P
       throw new CliError(`Path is not a file: ${value}`, 'invalid_media_input');
     }
   } catch (err: any) {
-    // A completed run's id stands in for its output — the same run-id media
-    // reference the MCP tools accept, so `-i run_abc` chains one generation
-    // into the next without a download/re-upload. Checked only after the path
-    // lookup misses, so a local file that happens to be named run_x still wins.
-    if (err?.code === 'ENOENT' && RUN_ID_REF.test(value)) {
-      return { url: await resolveRunOutputUrl(client, value) };
-    }
-    if (err?.code === 'ENOENT') {
-      throw new CliError(
-        `Media input is neither an http(s) URL nor an existing local file: ${value}`,
-        'invalid_media_input'
-      );
+    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+      return { url: await resolveMissingPath(client, value) };
     }
     throw err;
   }
 
-  const upload = await client.uploadFile(value);
+  const upload = await uploadLocalFile(client, value, options);
   return { url: upload.asset_url, uploaded: upload };
 }
 
-// Run ids come in more than one prefix (`run_…`, `dash_video_…`), so any
-// id-shaped value (no dot, no slash) that is not a file on disk is a run.
-const RUN_ID_REF = /^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_-]+$/;
+/**
+ * A value that is not a file on disk: a run id, a file whose extension was
+ * left off, or a mistake — told apart in that order of evidence.
+ *
+ * A completed run's id stands in for its output — the same run-id media
+ * reference the MCP tools accept, so `-i run_abc` chains one generation into
+ * the next without a download/re-upload. It is checked only after the path
+ * lookup misses, so a local file that happens to be named run_x still wins.
+ *
+ * `IMG_1234` (Finder hides the `.MOV`) is id-SHAPED, and used to go straight to
+ * GET /runs/IMG_1234 and come back as an API run_not_found the user could not
+ * connect to the file they meant. An ISSUED run id (`run_…`, `dash_…`) is
+ * still looked up first; anything else names a sibling with an extension
+ * before any lookup, and a lookup that misses says the value is neither.
+ */
+async function resolveMissingPath(client: GenFireClient, value: string): Promise<string> {
+  // An id the API issues is a run first: `run_x` must not turn into "did you
+  // mean run_x.mp4?" when it is a real run. The sibling only phrases the 404.
+  if (ISSUED_RUN_ID.test(value)) {
+    try {
+      return await resolveRunOutputUrl(client, value);
+    } catch (err) {
+      if (err instanceof GenFireApiError && err.status === 404) {
+        const sibling = findExtensionSibling(value);
+        throw new CliError(
+          `${value} is neither a local file nor a run on your account${sibling ? ` — did you mean ${sibling}?` : '.'}`,
+          'media_not_found'
+        );
+      }
+      throw err;
+    }
+  }
+  const sibling = findExtensionSibling(value);
+  if (sibling) {
+    throw new CliError(`File not found: ${value} — did you mean ${sibling}?`, 'file_not_found');
+  }
+  if (RUN_ID_REF.test(value)) {
+    try {
+      return await resolveRunOutputUrl(client, value);
+    } catch (err) {
+      // Not a prefix the API issues, so any refusal means "not a run".
+      if (err instanceof GenFireApiError && err.status >= 400 && err.status < 500) {
+        throw new CliError(`${value} is neither a local file nor a run on your account.`, 'media_not_found');
+      }
+      throw err;
+    }
+  }
+  const hint = /\s/.test(value) ? ' If this is your prompt, put it before the options (or after `--`).' : '';
+  throw new CliError(
+    `Media input is neither an http(s) URL nor an existing local file: ${value}.${hint}`,
+    'invalid_media_input'
+  );
+}
+
+// Id-SHAPED: one word, an underscore, no dot or slash. What GET /runs/:id is
+// tried for once the value is not a file on disk.
+export const RUN_ID_REF = /^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_-]+$/;
+// The prefixes the API actually issues (PublicApiRunService): `run_<hex>` for
+// API runs, `dash_<kind>_<docId>` for dashboard-projected ones.
+export const ISSUED_RUN_ID = /^(?:run_[A-Za-z0-9]+|dash_(?:image|video|audio|reel|model3d|game|app)_[A-Za-z0-9_-]+)$/;
+
+/** The FREE `POST /v1/media/inspect` probe (duration, frame, audio) of a URL. */
+export function inspectMediaUrl(url: string): Promise<{ durationSeconds?: number | null; hasAudio?: boolean | null }> {
+  return publicApiRequest<{ durationSeconds?: number | null; hasAudio?: boolean | null }>('POST', '/media/inspect', { body: { url } });
+}
 
 /** The primary output URL of a completed run, for `run_…` media references. */
 export async function resolveRunOutputUrl(client: GenFireClient, runId: string): Promise<string> {
@@ -317,7 +437,36 @@ async function downloadOne(fetchImpl: typeof fetch, url: string, destPath: strin
   await pipeline(Readable.fromWeb(response.body as any), createWriteStream(destPath));
 }
 
-export function reportRunCompletion(run: Run, downloadedPaths: string[]): void {
+/**
+ * A completed video run's `output.last_frame_url` — a still of the final frame
+ * at the video's resolution, for chaining the next shot — or null.
+ */
+export function lastFrameUrlOf(run: Pick<Run, 'output'> | null | undefined): string | null {
+  const url = run?.output?.last_frame_url;
+  return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null;
+}
+
+/**
+ * Where `--save-last-frame` writes the still: beside the video when exactly
+ * one file was saved (`shot.mp4` → `shot.last-frame.jpg`), else
+ * `<base>-last-frame.<ext>` in the -o directory (or the cwd).
+ */
+export function lastFrameTargetPath(
+  url: string,
+  savedVideoPaths: string[],
+  destination: string | undefined,
+  fallbackBase = 'video'
+): string {
+  const ext = extensionFromUrl(url) || '.jpg';
+  if (savedVideoPaths.length === 1) {
+    const video = savedVideoPaths[0];
+    const stem = basename(video, extname(video));
+    return join(dirname(video), `${stem}.last-frame${ext}`);
+  }
+  return join(destination || process.cwd(), `${fallbackBase}-last-frame${ext}`);
+}
+
+export function reportRunCompletion(run: Run, downloadedPaths: string[], opts: { lastFrameSaved?: boolean } = {}): void {
   printResult({ run, downloaded_to: downloadedPaths }, () => {
     if (run.status === 'completed') {
       process.stderr.write(`${green('Run completed.')} ${dim(`(${run.id})`)}\n`);
@@ -328,9 +477,15 @@ export function reportRunCompletion(run: Run, downloadedPaths: string[]): void {
       } else {
         process.stderr.write(`${yellow('No output URLs were extracted from the run.')}\n`);
       }
+      // The still of the final frame, when the video has one and it was not
+      // saved above: the URL to pass as --image on the next shot.
+      const lastFrame = lastFrameUrlOf(run);
+      if (lastFrame && !opts.lastFrameSaved) {
+        process.stderr.write(`${dim('Last frame:')} ${lastFrame}\n`);
+      }
     } else if (run.status === 'failed') {
-      const detail = run.error?.message ? `: ${run.error.message}` : '';
-      throw new CliError(`Run failed${detail}`, run.error?.code || 'run_failed');
+      // Carries the run id, so it prints as "Run <id> failed: …" + the `runs get` hint.
+      throw new CliError(run.error?.message || 'no error detail was recorded', run.error?.code || 'run_failed', 1, run.id);
     } else {
       process.stderr.write(`${dim(`Run is ${run.status}. Use \`genfire runs get ${run.id}\` to check later.`)}\n`);
     }

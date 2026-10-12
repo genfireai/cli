@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { GenFireClient, Run } from '@genfire/sdk';
 import { randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createClient, publicApiRequest } from '../client.js';
 import { CliError } from '../errors.js';
 import { dim, printResult } from '../output.js';
@@ -153,28 +153,11 @@ export function buildTrack(
 /**
  * A media input for compose: an https URL, a local path (uploaded), or a
  * run id (its first output URL). The route takes absolute https URLs only.
+ * Same resolution as every other media flag (resolveMediaInput), including
+ * the hidden-extension and not-a-run messages.
  */
 export async function resolveComposeMedia(client: GenFireClient, value: string): Promise<string> {
-  // Run ids come in more than one prefix (`run_…`, `dash_video_…`), so anything
-  // id-shaped that is not a file on disk is treated as a run.
-  if (!/^https?:\/\//i.test(value) && /^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_-]+$/.test(value) && !(await isFile(value))) {
-    const run: Run = await client.getRun(value);
-    if (run.status !== 'completed') {
-      throw new CliError(`Run ${value} is ${run.status}; only a completed run can be composed.`, 'run_not_completed');
-    }
-    const first = extractOutputUrls(run)[0];
-    if (!first) throw new CliError(`Run ${value} has no media output.`, 'run_has_no_media');
-    return first.url;
-  }
   return (await resolveMediaInput(client, value)).url;
-}
-
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 async function readJsonFile(path: string, flag: string): Promise<unknown> {

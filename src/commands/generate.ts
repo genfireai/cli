@@ -7,10 +7,14 @@ import { dim, printResult, yellow } from '../output.js';
 import {
   downloadOutputs,
   extractOutputUrls,
+  inspectMediaUrl,
+  lastFrameTargetPath,
+  lastFrameUrlOf,
   reportRunCompletion,
   resolveMediaInput,
   waitForRun
 } from '../runHelpers.js';
+import { uploadLocalFile } from '../upload.js';
 import { resolveMentionFromPrompt } from './influencers.js';
 import { readExplainerScriptFile } from './explainers.js';
 import {
@@ -24,6 +28,8 @@ import {
   type VideoFlags,
   buildSpeechExtras,
   draftFinalPath,
+  recoverTrailingPrompt,
+  VIDEO_VARIADIC_FLAGS,
   type SpeechExtraFlags
 } from '../generationRequests.js';
 
@@ -39,7 +45,15 @@ interface CommonGenerateOptions {
   project?: string;
   /** --quote: spend a price `genfire cost estimate` already showed. */
   quote?: string;
+  /** --save-last-frame (video only): also download the still of the final frame. */
+  saveLastFrame?: boolean;
 }
+
+/**
+ * `--save-last-frame` on the video commands. Not `--last-frame`: that flag
+ * already names the INPUT last frame of a first/last-frame clip.
+ */
+const SAVE_LAST_FRAME_HELP = 'Also download the still of the video\'s final frame (output.last_frame_url, when available) next to it — e.g. shot.mp4 + shot.last-frame.jpg — to pass as --image on the next shot. Without it the URL is printed';
 
 /**
  * `--team` / `--project` / `--quote`, as the wire fields the API takes.
@@ -179,7 +193,13 @@ async function maybeFinish(
     return;
   }
   const written = await downloadOutputs(outputs, options.output);
-  reportRunCompletion(run, written);
+  // The video alone by default; the final-frame still only when asked for.
+  const lastFrame = options.saveLastFrame ? lastFrameUrlOf(run) : null;
+  if (lastFrame) {
+    const target = lastFrameTargetPath(lastFrame, written, options.output, fallbackBase);
+    written.push(...await downloadOutputs([{ url: lastFrame, suggestedName: target }], target));
+  }
+  reportRunCompletion(run, written, { lastFrameSaved: !!lastFrame });
 }
 
 export function registerGenerateCommands(program: Command): void {
@@ -221,16 +241,30 @@ export function registerGenerateCommands(program: Command): void {
 
   // ---- video ----
   // Same arrangement as image: flags + body shared with `genfire cost video`.
+  // `[prompt]`, not `<prompt>`: a prompt typed after a variadic --ref-* list
+  // lands IN that list, and commander would refuse the command before the
+  // action could take it back (recoverTrailingPrompt). Still required below.
   addVideoRequestOptions(commonOptions(
     generate
-      .command('video <prompt>')
+      .command('video [prompt]')
+      .usage('<prompt> [options]')
       .description('Generate a video from a prompt — text, start/end frame, first/last frame, references, source clip, keyframes or Kling O3 elements. @<handle> binds an influencer or element on reference-capable models.')
   , { fileable: true }))
-    .action(async (prompt: string, opts: CommonGenerateOptions & VideoFlags) => {
+    .option('--save-last-frame', SAVE_LAST_FRAME_HELP)
+    .action(async (promptArg: string | undefined, opts: CommonGenerateOptions & VideoFlags) => {
+      const prompt = recoverTrailingPrompt(promptArg, opts, VIDEO_VARIADIC_FLAGS);
+      if (prompt === undefined) {
+        throw new CliError(
+          'Missing the prompt, e.g. genfire generate video "a fox runs through snow" (pass "" for none).',
+          'missing_prompt'
+        );
+      }
       // Shape checks (style, task, trims, frames…) before anything is uploaded.
       validateVideoFlags(opts);
       const client = await createClient();
-      const body = await buildVideoRequest(opts, async (input) => (await resolveMediaInput(client, input)).url);
+      const body = await buildVideoRequest(opts, async (input) => (await resolveMediaInput(client, input)).url, {
+        inspectMedia: inspectMediaUrl
+      });
       const run = await client.createVideoGeneration(
         { prompt, ...body, ...scopeFields(opts) } as any,
         { idempotencyKey: randomUUID() }
@@ -246,13 +280,14 @@ export function registerGenerateCommands(program: Command): void {
   // would only 400, and it has no quote token to spend.
   generate
     .command('draft-final <draftId>')
-    .description('Render the native 1080p FINAL of a Seedance 2.5 draft (a `generate video --draft` run): the same shot — prompt, references, duration, ratio, seed, audio — as a new run. Bills what a direct 1080p render costs; price it first with `genfire cost draft-final <draftId>`. Within 7 days of the draft')
+    .description('Render the native 1080p FINAL of a Seedance 2.5 draft (a `generate video --draft` run): the same shot — prompt, references, duration, ratio, audio — as a new run. Bills what a direct 1080p render costs; price it first with `genfire cost draft-final <draftId>`. Within 7 days of the draft')
     .option('-o, --output <path>', 'Where to save the output. Single file path or directory; defaults to cwd')
     .option('--no-download', "Don't download outputs locally; only print the URLs")
     .option('--no-wait', "Don't wait for the run to finish; print the queued run and exit")
     .option('--wait-timeout <duration>', 'Maximum time to wait, e.g. 15m, 600s', '15m')
     .option('--wait-interval <duration>', 'Polling interval while waiting', '2s')
     .option('--project <projectId>', 'File the result into this project when it completes')
+    .option('--save-last-frame', SAVE_LAST_FRAME_HELP)
     .action(async (draftId: string, opts: CommonGenerateOptions) => {
       const path = draftFinalPath(draftId);
       const client = await createClient();
@@ -291,12 +326,14 @@ export function registerGenerateCommands(program: Command): void {
     .option('--stability <0-1>', 'Voice stability (ElevenLabs; also read by dialogue)')
     .option('--voice-settings <json>', 'Raw ElevenLabs voice_settings object, e.g. \'{"similarity_boost":0.8,"style":0.3}\'')
     .option('--title <title>', 'Optional title for the run')
-    .action(async (text: string | undefined, opts: CommonGenerateOptions & SpeechExtraFlags & {
+    .action(async (textArg: string | undefined, opts: CommonGenerateOptions & SpeechExtraFlags & {
       model?: string; voiceId?: string; voiceName?: string; format?: string;
       audioUrl?: string[]; imageUrl?: string; sampleRate?: string; speed?: string; volume?: string; pitch?: string;
       language?: string; seed?: string; previousText?: string; nextText?: string; normalize?: string; timestamps?: boolean;
       title?: string;
     }) => {
+      // `--audio-url <url...>` is variadic, so text typed after it lands in it.
+      const text = recoverTrailingPrompt(textArg, opts, ['audioUrl']);
       if (opts.normalize && !['auto', 'on', 'off'].includes(opts.normalize)) {
         throw new CliError('--normalize must be auto, on or off', 'invalid_option');
       }
@@ -930,7 +967,7 @@ export function registerGenerateCommands(program: Command): void {
     .description('Upload a local file and print its asset URL (useful for chaining with other tools)')
     .action(async (path: string) => {
       const client = await createClient();
-      const upload = await client.uploadFile(path);
+      const upload = await uploadLocalFile(client, path);
       printResult(upload, () => {
         process.stdout.write(`${upload.asset_url}\n`);
         process.stderr.write(

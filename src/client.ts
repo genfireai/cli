@@ -70,7 +70,10 @@ export async function publicApiRequest<T>(
   if (!response.ok) {
     throw new CliError(
       String(parsed?.detail || parsed?.title || text || `Request failed with ${response.status}`),
-      String(parsed?.code || 'request_failed')
+      String(parsed?.code || 'request_failed'),
+      1,
+      // A submit refused after its run was created names the run (422 + run_id).
+      typeof parsed?.run_id === 'string' ? parsed.run_id : undefined
     );
   }
 

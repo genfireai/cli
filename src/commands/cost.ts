@@ -5,7 +5,7 @@ import { createClient } from '../client.js';
 import { bold, cyan, dim, printJson, printResult, yellow } from '../output.js';
 import type { EstimateCostRequest, GenFireClient } from '@genfire/sdk';
 import { CliError } from '../errors.js';
-import { resolveMediaInput } from '../runHelpers.js';
+import { inspectMediaUrl, resolveMediaInput } from '../runHelpers.js';
 import {
   addImageRequestOptions,
   addVideoRequestOptions,
@@ -14,7 +14,10 @@ import {
   type ImageFlags,
   type VideoFlags,
   buildSpeechExtras,
-  draftFinalPath
+  draftFinalPath,
+  recoverTrailingPrompt,
+  VIDEO_VARIADIC_FLAGS,
+  videoEstimateCount
 } from '../generationRequests.js';
 
 /** Local paths upload and run ids resolve, exactly as on `generate`. */
@@ -71,10 +74,14 @@ export function registerCostCommand(program: Command): void {
       .command('video [prompt]')
       .description('Estimate the credit cost of a video generation — accepts every `generate video` flag, so references, source clips, Genjudo tasks and LoRAs route (and price) like the real call')
   )
-    .option('-n, --count <n>', 'Number of clips to price (estimate only — each `generate video` run makes one)')
+    .option('-n, --count <n>', 'Number of clips to price (estimate only — each `generate video` run makes one). video.seedance_2_5 renders one video per request: a count above 1 is clamped to 1 and quoted as one clip')
     .option('--image-url <url>', 'Deprecated alias of --image')
     .option('--reference-image-urls <urls>', 'Deprecated: comma-separated form of --ref-image')
-    .action(async (_prompt: string | undefined, opts: VideoFlags & { count?: string; imageUrl?: string; referenceImageUrls?: string }) => {
+    .action(async (prompt: string | undefined, opts: VideoFlags & { count?: string; imageUrl?: string; referenceImageUrls?: string }) => {
+      // Same recovery as `generate video`: a prompt typed after a --ref-* list
+      // is taken back out of it, never uploaded as a file. The prompt itself is
+      // not a price input, so it is dropped once recovered.
+      recoverTrailingPrompt(prompt, opts, VIDEO_VARIADIC_FLAGS);
       const merged: VideoFlags = {
         ...opts,
         image: opts.image ?? opts.imageUrl,
@@ -84,9 +91,12 @@ export function registerCostCommand(program: Command): void {
         ]
       };
       if (merged.refImage!.length === 0) delete merged.refImage;
+      // Parsed before anything uploads. Sent as given: the API clamps a
+      // Seedance 2.5 count above 1 to one video.
+      const count = videoEstimateCount(merged.model, opts.count);
       const client = await createClient();
-      const body = await buildVideoRequest(merged, mediaResolver(client));
-      if (opts.count) body.count = Number(opts.count);
+      const body = await buildVideoRequest(merged, mediaResolver(client), { inspectMedia: inspectMediaUrl });
+      if (count !== undefined) body.count = count;
       await runEstimate(await withDefaultModel(client, body, 'video_generation'));
     });
 
@@ -182,7 +192,7 @@ export function registerCostCommand(program: Command): void {
         throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz or flux.`, 'invalid_engine');
       }
       await runEstimate({
-        model: engine === 'flux' ? 'video_upscale.flux_video_upscale' : 'video_upscale.fal_video_upscaler',
+        model: engine === 'flux' ? 'video_upscale.flux_video_upscale' : 'video_upscale.topaz',
         scale_factor: Number(opts.scale),
         ...(engine === 'flux' ? { mode: opts.mode } : {}),
         duration: opts.duration ? Number(opts.duration) : undefined,

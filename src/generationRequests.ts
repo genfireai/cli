@@ -1,6 +1,9 @@
 import { Command } from 'commander';
+import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { CliError } from './errors.js';
+import { ISSUED_RUN_ID } from './runHelpers.js';
+import { findExtensionSibling } from './upload.js';
 
 /**
  * ONE flag set and ONE body builder per generation kind, shared by
@@ -27,6 +30,13 @@ import { CliError } from './errors.js';
  */
 
 export type MediaResolver = (input: string) => Promise<string>;
+
+/**
+ * The FREE `POST /v1/media/inspect` probe, injected the same way: Genjudo's
+ * "Match the clip" sizes the run from the clip's measured length, and cost and
+ * generate must measure it identically for the quote to stay spendable.
+ */
+export type MediaInspector = (url: string) => Promise<{ durationSeconds?: number | null; hasAudio?: boolean | null }>;
 
 export const collect = (value: string, previous: string[] = []): string[] => previous.concat([value]);
 
@@ -87,6 +97,86 @@ function compact<T extends Record<string, unknown>>(body: T): T {
     if (body[key] === undefined) delete body[key];
   }
   return body;
+}
+
+// ─── A prompt typed after a variadic flag ────────────────────────────────────
+
+/**
+ * `--ref-image <urlOrPath...>` (and the other `<…...>` media flags) is
+ * variadic: commander hands it EVERY following word up to the next flag. So
+ * `generate video -m video.seedance_2_5 --ref-video a.mov --ref-image me.jpg
+ * "make her dance"` read the prompt as a second reference image — `generate
+ * video` died with "missing required argument 'prompt'" and `cost video`
+ * tried to upload the prompt as a file.
+ *
+ * When no prompt reached the positional, the LAST value of each variadic list
+ * is looked at, and one that is clearly not media is taken back as the prompt
+ * (`--ref-image a.jpg b.jpg` keeps working: both are files). Called by
+ * generate AND cost, on the same parsed flags, so the two still build one body
+ * (see the quote note at the top of this file).
+ */
+export const VIDEO_VARIADIC_FLAGS = ['refImage', 'refVideo', 'refAudio', 'refVideoTrim'] as const;
+
+function pathExists(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when a trailing variadic value is the prompt rather than media. An
+ * EXISTING path — file or directory, spaces and all (`Screen Recording.mov`,
+ * `My Clips`) — is always media. Anything else with whitespace is prose: no
+ * URL or run id has any. A single word is the prompt unless something about
+ * it says media: a URL, an issued run id (`run_…`, `dash_video_…` — NOT any
+ * word with an underscore, so `slow_motion` is a prompt), a slash or an
+ * extension, or an `IMG_1234.MOV` beside it.
+ */
+export function looksLikePrompt(value: string, exists: (path: string) => boolean = pathExists): boolean {
+  if (value.trim() === '') return true;
+  if (exists(value)) return false;
+  if (/\s/.test(value)) return true;
+  if (/^https?:\/\//i.test(value) || ISSUED_RUN_ID.test(value)) return false;
+  if (/[\\/]/.test(value) || /\.[A-Za-z0-9]{1,5}$/.test(value)) return false;
+  return findExtensionSibling(value) === null;
+}
+
+/**
+ * The prompt, recovered from the tail of one variadic list when the positional
+ * got none (the list loses that value). Undefined when no tail reads as a
+ * prompt; an error when two do, since which one was meant is a guess.
+ */
+export function recoverTrailingPrompt(
+  prompt: string | undefined,
+  opts: object,
+  keys: readonly string[],
+  exists: (path: string) => boolean = pathExists
+): string | undefined {
+  if (prompt !== undefined) return prompt;
+  const lists = opts as Record<string, unknown>;
+  const hits = keys.filter((key) => {
+    const list = lists[key];
+    if (!Array.isArray(list) || list.length === 0) return false;
+    const last = String(list[list.length - 1]);
+    // A trim spec (`0:2-6`) is a --ref-video-trim value, never prose.
+    if (key === 'refVideoTrim' && /^\s*\d+\s*:/.test(last)) return false;
+    return looksLikePrompt(last, exists);
+  });
+  if (hits.length === 0) return undefined;
+  if (hits.length > 1) {
+    const values = hits.map((key) => `"${(lists[key] as string[]).at(-1)}"`).join(' and ');
+    throw new CliError(
+      `Both ${values} read as the prompt. Put the prompt right after the command (before the options), or after \`--\`.`,
+      'ambiguous_prompt'
+    );
+  }
+  const list = lists[hits[0]] as string[];
+  const recovered = list[list.length - 1];
+  lists[hits[0]] = list.length > 1 ? list.slice(0, -1) : undefined;
+  return recovered;
 }
 
 // ─── Marketing Studio + brand grounding (image AND video) ────────────────────
@@ -163,7 +253,7 @@ export interface ImageFlags extends GroundingFlags {
 export function addImageRequestOptions(cmd: Command): Command {
   cmd
     .option('-m, --model <model>', 'Public model alias, e.g. image.nano_banana_2 (default: the API default image model)')
-    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, e.g. 1:1, 16:9')
+    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). A ONE-clip Genjudo run (video.seedance_2_5, exactly one --ref-video, --task reference / none or editing) defaults to auto — the clip\'s own frame, the same default the API applies')
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option(
       '-i, --image <urlOrPath>',
@@ -328,24 +418,26 @@ export interface VideoFlags extends GroundingFlags {
   insertResume?: string;
   /** commander's `--no-color-match`: true unless negated. */
   colorMatch?: boolean;
+  /** `--keep-clip-audio` / `--no-keep-clip-audio`; undefined when neither was passed. */
+  keepClipAudio?: boolean;
 }
 
 export function addVideoRequestOptions(cmd: Command): Command {
   cmd
     .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1 (default: the API default video model)')
-    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`)')
-    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5)')
+    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). Genjudo runs (video.seedance_2_5 with a --ref-video, any --task) default to auto: the clip\'s own frame — the API applies the same default to a one-clip run')
+    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded down when the clip\'s sound is kept, up otherwise, 4-30 — the same default the API applies')
     .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
-    .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id')
+    .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
     .option('--start-image <urlOrPath>', 'Kling O3 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
     .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add`)
     .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
-    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s) or local paths — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 1.8-30.2s, 30.2s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits or transfers motion from')
-    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance)')
-    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s) or local paths, 2-15s each — cite as Audio 1..Audio 3. Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
+    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
+    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5, where every window shares the 30s pool)')
+    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s), local paths or run ids — cite as Audio 1… (Hailuo 03, Wan 3.0) or @Audio1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0 (2-15s each), 10 on video.seedance_2_5 (each 2-30s and ≤15 MB, 30s TOTAL across the pool), 5 on Wan 3.0 (15s total). Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
     .option('--keyframe <FRAME:urlOrPath>', 'Pin an image at a 24 fps frame index, e.g. --keyframe 0:start.png --keyframe 96:end.png (Flux 3 keyframes-to-video; capabilities.keyframes). Repeatable', collect, [] as string[])
     .option('--draft-cache-url <url>', 'Flux 3 draft-enhance: the draft_cache_url a previous /draft run returned')
     .option('--file-url <urlOrPath>', 'Document to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
@@ -357,10 +449,12 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--camera-path <preset>', `H3 Max Multi Angle camera move: ${CAMERA_PATH_IDS.join(', ')}`)
     .option('--camera-trajectory <file>', 'H3 Max Multi Angle explicit camera path: JSON array of 2-12 { time, azimuth, elevation, distance } keyframes')
     .option('--no-audio', 'Disable audio generation if the model supports it')
-    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast and Seedance 2.5 only')
+    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast only — it has no effect on video.seedance_2_5 (not sent) or any other model (ignored by the API)')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
     .option('--draft', 'video.seedance_2_5 only: render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p, within 7 days')
-    .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need a --ref-video. Recipes with the prompts written for you: genfire genjudo presets')
+    .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it; with ONE clip and -a / -d left off it MATCHES THE CLIP, its frame and its measured length), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need exactly one --ref-video. A video.seedance_2_5 run with a --ref-video and no --task runs as reference. With ONE clip, reference and editing keep the clip\'s own sound (when it has a soundtrack and no --ref-audio is sent) unless you pass --no-keep-clip-audio or --no-audio. These are exactly the defaults the API applies to a one-clip run — never to two or more clips, never to extension — so leaving them to the CLI or the API renders the same clip. Recipes with the prompts written for you: genfire genjudo presets')
+    .option('--keep-clip-audio', 'Genjudo (video.seedance_2_5 with a --ref-video): keep the CLIP\'S OWN SOUND. The clip goes in silent and its original audio is laid back on the result, instead of a generated soundtrack. The default for a ONE-clip --task reference (also when --task is omitted) or --task editing run whose clip has a soundtrack, when no --ref-audio is sent — as in the web Genjudo and the API. No effect on --task extension (the new seconds have no source audio)')
+    .option('--no-keep-clip-audio', 'Genjudo: let the model make the soundtrack instead of keeping the clip\'s own — sends keep_source_audio false, so the API\'s keep-the-clip-sound default does not apply either (add --no-audio for a silent result)')
     .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
     .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
     .option('--insert-start <seconds>', `H3 Max Insert: second of --source-video where the NEW scene begins (≥${H3_MAX_INSERT_MIN_START_SECONDS}). Needs --insert-resume; runs on ${H3_MAX_INSERT_ALIAS} (picked for you when -m is omitted). The prompt and/or --ref-image (≤9) / --ref-video (≤3) describe the new scene; -d (5-13) is the new scene's length and the only seconds billed; the whole edited clip comes back`)
@@ -490,12 +584,35 @@ export function validateVideoFlags(opts: VideoFlags): void {
   if (bitrate && bitrate !== 'standard' && bitrate !== 'high') {
     throw new CliError('--bitrate must be standard or high.', 'invalid_bitrate_mode');
   }
+  // --bitrate on video.seedance_2_5 (no encode setting) is simply not sent —
+  // see buildVideoRequest — and the API ignores it on every other model
+  // without the capability; neither value is refused (owner decision
+  // 2026-10-12). --image beside reference media on 2.5 is not refused either:
+  // the API folds the image into the reference images as the next @ImageN.
   const task = oneOf(opts.task, VIDEO_TASKS, '--task');
   if ((task === 'editing' || task === 'extension') && !opts.refVideo?.length) {
     throw new CliError(
       `--task ${task} works on an existing clip. Pass it with --ref-video (and cite it as @Video1 in the prompt).`,
       'task_requires_reference_video'
     );
+  }
+  // The API refuses more than one (task_requires_one_reference_video) — after
+  // every clip was uploaded. Same rule, before anything is.
+  if ((task === 'editing' || task === 'extension') && (opts.refVideo?.length ?? 0) > 1) {
+    throw new CliError(
+      `--task ${task} works on ONE clip at a time — pass a single --ref-video (got ${opts.refVideo!.length}).`,
+      'task_requires_one_reference_video'
+    );
+  }
+  if (opts.keepClipAudio === true) {
+    if (!isGenjudoModel(opts.model)) {
+      throw new CliError(`--keep-clip-audio is a Genjudo option — run it on -m ${GENJUDO_MODEL}.`, 'unsupported_genjudo_option');
+    }
+    if (!opts.refVideo?.length) {
+      throw new CliError('--keep-clip-audio keeps a clip\'s own sound — pass the clip with --ref-video.', 'keep_clip_audio_requires_reference_video');
+    }
+    // On --task extension it has no effect (the new seconds have no source
+    // sound): not refused, and not sent (genjudoFields) — the API ignores it too.
   }
   oneOf(opts.shotType, ['customize', 'intelligent'], '--shot-type');
   oneOf(opts.cameraPath, CAMERA_PATH_IDS, '--camera-path');
@@ -517,6 +634,146 @@ export function validateVideoFlags(opts: VideoFlags): void {
   }
 }
 
+// ─── Genfire Genjudo defaults (video.seedance_2_5 + --task) ──────────────────
+
+const GENJUDO_MODEL = 'video.seedance_2_5';
+// Shortest / longest single Seedance 2.5 pass — the web Genjudo's
+// GEDI_MIN/MAX_DURATION_SECONDS (frontend buildGediRequest).
+const GENJUDO_MIN_SECONDS = 4;
+const GENJUDO_MAX_SECONDS = 30;
+
+function isGenjudoModel(model?: string): boolean {
+  return String(model ?? '').trim().toLowerCase() === GENJUDO_MODEL;
+}
+
+/**
+ * The task a Seedance 2.5 run with a clip actually RUNS: `--task`, or —
+ * omitted — `reference`, the default the API leaves to the model (it sends
+ * no task and the model applies "reference"). So every Genjudo default below
+ * treats "no --task" exactly like `--task reference`. Undefined off Genjudo.
+ */
+function genjudoTask(opts: VideoFlags): string | undefined {
+  if (!isGenjudoModel(opts.model) || !opts.refVideo?.length) return undefined;
+  return opts.task?.trim().toLowerCase() || 'reference';
+}
+
+/**
+ * The task of a ONE-clip Genjudo run the API applies its defaults to —
+ * video.seedance_2_5, EXACTLY one --ref-video, `reference` (or no --task) or
+ * `editing`. Undefined otherwise: two or more clips and extension get the
+ * plain API defaults (16:9, 5 s, a generated soundtrack), and so get nothing
+ * filled in here either.
+ */
+function genjudoDefaultTask(opts: VideoFlags): 'reference' | 'editing' | undefined {
+  const task = genjudoTask(opts);
+  if ((opts.refVideo?.length ?? 0) !== 1) return undefined;
+  return task === 'reference' || task === 'editing' ? task : undefined;
+}
+
+/**
+ * Whether the clip's own sound is kept, mirroring the web Genjudo and the API.
+ * An explicit flag wins (and `--no-audio` alone is the web's "Silent" choice,
+ * a caller-set generate_audio the API's default does not override). Otherwise
+ * it is the API's one-clip default, under the API's conditions: exactly one
+ * clip, reference / editing, no --ref-audio, and a clip that HAS a soundtrack
+ * (`clip.hasAudio === false` turns it off; unknown is assumed to have one).
+ */
+export function resolveKeepClipAudio(opts: VideoFlags, clip: { hasAudio?: boolean | null } = {}): boolean {
+  const task = genjudoTask(opts);
+  if (!task || task === 'extension') return false;
+  if (opts.keepClipAudio !== undefined) return opts.keepClipAudio;
+  if (opts.audio === false) return false;
+  if (!genjudoDefaultTask(opts) || opts.refAudio?.length) return false;
+  return clip.hasAudio !== false;
+}
+
+/**
+ * "Match the clip" length — the web's gediAutoDurationSeconds and the API's:
+ * the clip's seconds rounded UP, or DOWN when its own sound is laid back on
+ * (the restored track ends with the clip, so a rounded-up render ended on
+ * silence), clamped to what one pass renders (4-30).
+ */
+export function matchClipSeconds(clipSeconds: number, keepSound: boolean): number {
+  // Capped and rounded to the millisecond FIRST, exactly like the backend
+  // (referenceVideoTrim seedance25FollowSourceBillableSeconds): a 0.2–8.2
+  // window is 7.999… in floats, and flooring that sent 7 for an 8 s bill.
+  const clip = Math.round(Math.min(clipSeconds, GENJUDO_MAX_SECONDS) * 1000) / 1000;
+  const whole = keepSound ? Math.floor(clip) : Math.ceil(clip);
+  return Math.min(GENJUDO_MAX_SECONDS, Math.max(GENJUDO_MIN_SECONDS, whole));
+}
+
+/**
+ * The Genjudo fields the web sends and the API ALSO defaults on its own —
+ * filled in here under exactly the API's conditions, so the CLI renders the
+ * same clip against a server that applies them and one that does not yet, and
+ * the cost and generate bodies stay identical (both are built here):
+ *   - ONE clip, reference (or no --task) or editing (genjudoDefaultTask):
+ *     the frame follows the clip (`aspect_ratio: auto`) unless -a was passed;
+ *   - ONE clip, reference, no -d, -a left off or auto: "Match the clip" — its
+ *     measured length (the trimmed window when trimmed) plus `follow_source`;
+ *   - ONE clip, reference / editing, no --keep-clip-audio / --no-keep-clip-
+ *     audio / --no-audio, no --ref-audio, and a clip with a soundtrack: its
+ *     own sound (`keep_source_audio`, the generated track off).
+ * Two or more clips and extension get none of these, as from the API. The
+ * clip is probed (the free POST /media/inspect) only when a default depends
+ * on it. An unmeasurable clip fails a length match; when only the sound
+ * depended on the probe, the sound fields are left to the API, which applies
+ * the same rule to its own measurement. Explicit flags are sent as given —
+ * `--no-keep-clip-audio` as `keep_source_audio: false`, or the API's default
+ * would put the clip's sound back on (never on extension, where it has no effect).
+ */
+async function genjudoFields(
+  opts: VideoFlags,
+  referenceVideoUrls: string[] | undefined,
+  trims: Array<{ index: number; start: number; end: number }>,
+  inspectMedia: MediaInspector | undefined
+): Promise<Record<string, unknown>> {
+  const task = genjudoTask(opts);
+  if (!task || !referenceVideoUrls?.length) return {};
+  const fields: Record<string, unknown> = {};
+  if (task !== 'extension' && opts.keepClipAudio === false) fields.keep_source_audio = false;
+  // Never on extension, where it has no effect: sending it there would also
+  // turn the generated soundtrack off and leave the new seconds silent.
+  if (task !== 'extension' && opts.keepClipAudio === true) {
+    fields.keep_source_audio = true;
+    fields.generate_audio = false;
+  }
+  const defaultTask = genjudoDefaultTask(opts);
+  if (!defaultTask) return fields;
+
+  if (opts.aspectRatio === undefined) fields.aspect_ratio = 'auto';
+  const followsClip = opts.aspectRatio === undefined || opts.aspectRatio.trim().toLowerCase() === 'auto';
+  const matchLength = defaultTask === 'reference' && opts.duration === undefined && followsClip;
+  const soundByDefault = opts.keepClipAudio === undefined && opts.audio !== false && !opts.refAudio?.length;
+  if (!matchLength && !soundByDefault) return fields;
+
+  let reason = '';
+  const probe = inspectMedia
+    ? await inspectMedia(referenceVideoUrls[0]).catch((err: unknown) => {
+        reason = ` (${err instanceof Error ? err.message : String(err)})`;
+        return null;
+      })
+    : null;
+  if (soundByDefault && probe && probe.hasAudio !== false) {
+    fields.keep_source_audio = true;
+    fields.generate_audio = false;
+  }
+  if (matchLength) {
+    const full = Number(probe?.durationSeconds);
+    if (!Number.isFinite(full) || full <= 0) {
+      throw new CliError(
+        `Could not measure the --ref-video to match its length${reason}. Pass -d <seconds> (4-30) to set the length yourself.`,
+        'reference_video_unmeasured'
+      );
+    }
+    const trim = trims.find((t) => t.index === 0);
+    const seconds = trim ? Math.max(0, Math.min(trim.end, full) - Math.min(trim.start, full)) : full;
+    fields.duration = matchClipSeconds(seconds, resolveKeepClipAudio(opts, { hasAudio: probe?.hasAudio }));
+    fields.follow_source = true;
+  }
+  return fields;
+}
+
 async function resolveAll(entries: string[] | undefined, resolveMedia: MediaResolver): Promise<string[] | undefined> {
   if (!entries || entries.length === 0) return undefined;
   return Promise.all(entries.map((entry) => resolveMedia(entry)));
@@ -528,7 +785,11 @@ async function resolveAll(entries: string[] | undefined, resolveMedia: MediaReso
  * /v1/models/estimate-cost, so the routing (t2v / i2v / ref / edit / Genjudo
  * video-ref) and the quote fingerprint match the real submit.
  */
-export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaResolver): Promise<Record<string, unknown>> {
+export async function buildVideoRequest(
+  opts: VideoFlags,
+  resolveMedia: MediaResolver,
+  context: { inspectMedia?: MediaInspector } = {}
+): Promise<Record<string, unknown>> {
   validateVideoFlags(opts);
   const style = opts.style !== undefined ? normalizeVideoStyle(opts.style) : undefined;
   const insertWindow = parseInsertWindow(opts);
@@ -563,12 +824,13 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
   }
 
   const one = async (value: string | undefined) => (value ? resolveMedia(value) : undefined);
+  const genjudo = await genjudoFields(opts, referenceVideoUrls, trims, context.inspectMedia);
   return compact({
     // A style, and an insert window, each have one engine; everything else
     // keeps the API default.
     model: opts.model ?? (style ? H3_MAX_STYLES_ALIAS : insertWindow ? H3_MAX_INSERT_ALIAS : undefined),
-    aspect_ratio: opts.aspectRatio,
-    duration: num(opts.duration, '--duration', { int: true }),
+    aspect_ratio: opts.aspectRatio ?? genjudo.aspect_ratio,
+    duration: num(opts.duration, '--duration', { int: true }) ?? genjudo.duration,
     resolution: opts.resolution,
     image_url: await one(opts.image),
     start_image_url: await one(opts.startImage),
@@ -593,9 +855,15 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
     // Only an explicit opt-out is sent. The API defaults to audio on, and the
     // quote fingerprint keys generate_audio only when it is a boolean — so
     // sending `true` by default made every default quote unspendable.
-    generate_audio: opts.audio === false ? false : undefined,
-    bitrate_mode: opts.bitrate ?? opts.bitrateMode,
+    generate_audio: opts.audio === false ? false : genjudo.generate_audio,
+    // video.seedance_2_5 has no encode setting: --bitrate has no effect there,
+    // so it is not sent (the same body for `cost video` and `generate video`).
+    bitrate_mode: isGenjudoModel(opts.model) ? undefined : (opts.bitrate ?? opts.bitrateMode),
     task: opts.task?.trim().toLowerCase(),
+    // Genjudo: the clip's own sound back on the result, and "Match the clip".
+    // Sent only when they apply — the API 400s both on any other model.
+    keep_source_audio: genjudo.keep_source_audio,
+    follow_source: genjudo.follow_source,
     // Only when set: the API keys `draft` into the quote fingerprint only
     // when sent, so an absent flag keeps every non-draft quote spendable.
     draft: opts.draft ? true : undefined,
@@ -608,6 +876,16 @@ export async function buildVideoRequest(opts: VideoFlags, resolveMedia: MediaRes
     color_match: opts.colorMatch === false ? false : undefined,
     ...(await buildGrounding(opts, resolveMedia))
   });
+}
+
+/**
+ * `genfire cost video -n` → the `count` the estimate is sent, or undefined
+ * when -n was not passed. Sent as given on every model: video.seedance_2_5
+ * renders ONE video per request and the API clamps a count above 1 to 1
+ * (quoting one video) rather than refusing it (owner decision 2026-10-12).
+ */
+export function videoEstimateCount(_model: string | undefined, count: string | undefined): number | undefined {
+  return num(count, '--count', { int: true });
 }
 
 // ─── Seedance 2.5 draft → 1080p final ────────────────────────────────────────

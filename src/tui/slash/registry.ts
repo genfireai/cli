@@ -1,5 +1,6 @@
 import type { GenFireClient } from '@genfire/sdk';
 import { useTuiStore, AccountSnapshot } from '../store.js';
+import { apiErrorRunId } from '../../errors.js';
 
 export interface SlashContext {
   args: string[];
@@ -115,7 +116,8 @@ export async function dispatchSlash(line: string): Promise<void> {
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    log(`Error: ${detail}`, 'error');
+    const runId = apiErrorRunId(err);
+    log(runId ? `Run ${runId} failed: ${detail} (details: /runs ${runId})` : `Error: ${detail}`, 'error');
   } finally {
     store.setBusy(false);
   }

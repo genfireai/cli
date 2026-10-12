@@ -25,10 +25,10 @@ export function registerVoicesCommand(program: Command): void {
             id: v.id,
             name: v.name,
             type: v.type,
-            provider: v.provider,
             created: v.created_at ? v.created_at.replace('T', ' ').slice(0, 19) : ''
           })),
-          ['id', 'name', 'type', 'provider', 'created']
+          // No `provider` column: `type` (cloned / stock) is what tells voices apart.
+          ['id', 'name', 'type', 'created']
         );
         process.stdout.write(
           `\n${dim('Use one: genfire generate speech "Hello" --voice-id <id>')}\n`
