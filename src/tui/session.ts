@@ -2,9 +2,9 @@ import {
   GenFireApiError,
   GenFireClient,
   exchangeCliAuthSession,
-  getCliAuthSession,
   startCliAuthSession
 } from '@genfire/sdk';
+import { pollCliAuthSession } from '../cliAuthPoll.js';
 import { readConfig, resolveApiKey, resolveBaseUrl } from '../config.js';
 import {
   deleteCredentials,
@@ -16,8 +16,6 @@ import { generatePkcePair } from '../pkce.js';
 import { useTuiStore } from './store.js';
 
 const CLI_CLIENT_ID = 'genfire-cli';
-const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_MS = 10 * 60 * 1000;
 
 /** Mirror of CLI_DEFAULT_SCOPES in commands/auth.ts. Keep these in sync. */
 const CLI_DEFAULT_SCOPES = [
@@ -81,18 +79,6 @@ async function tryOpenBrowser(url: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function pollUntilTerminal(sessionId: string, baseUrl: string): Promise<'approved' | 'denied' | 'expired'> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < POLL_MAX_MS) {
-    const status = await getCliAuthSession(sessionId, { baseUrl });
-    if (status.status === 'approved') return 'approved';
-    if (status.status === 'denied') return 'denied';
-    if (status.status === 'expired') return 'expired';
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
-  return 'expired';
 }
 
 async function validateKey(apiKey: string, baseUrl: string): Promise<{ accountId: string; email: string | null; displayName: string; plan: string; credits: number }> {
@@ -199,7 +185,15 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
     log(start.verification_url, 'output');
   }
 
-  const result = await pollUntilTerminal(start.session_id, baseUrl);
+  const result = await pollCliAuthSession(start.session_id, {
+    baseUrl,
+    // Once per streak: a long outage should not log a line every 10 s.
+    onRetry: ({ reason, waitMs, consecutiveFailures }) => {
+      if (consecutiveFailures !== 1) return;
+      const why = reason === 'rate_limited' ? 'Login status check was rate limited' : 'Could not reach Genfire';
+      log(`${why}; still waiting (retrying in ${Math.ceil(waitMs / 1000)}s)...`, 'info');
+    }
+  });
   if (result === 'denied') throw new Error('Authorization was denied in the browser.');
   if (result === 'expired') throw new Error('Login session expired. Try /login again.');
 

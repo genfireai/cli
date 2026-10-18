@@ -3,9 +3,9 @@ import {
   GenFireApiError,
   GenFireClient,
   exchangeCliAuthSession,
-  getCliAuthSession,
   startCliAuthSession
 } from '@genfire/sdk';
+import { pollCliAuthSession } from '../cliAuthPoll.js';
 import { CliError } from '../errors.js';
 import { readConfig, resolveApiKey, resolveBaseUrl } from '../config.js';
 import { deleteCredentials, getFallbackPath, isUsingKeychain, saveCredentials } from '../credentials.js';
@@ -14,8 +14,6 @@ import { VERSION, checkLatestVersion } from '../versionCheck.js';
 import { bold, cyan, dim, green, printResult, red, yellow } from '../output.js';
 
 const CLI_CLIENT_ID = 'genfire-cli';
-const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_MS = 10 * 60 * 1000;
 
 /**
  * Scopes the CLI requests by default during browser auth. We intentionally
@@ -79,23 +77,17 @@ function deviceLabel(): string {
   return host ? `genfire-cli (${host}, ${date})` : `genfire-cli (${date})`;
 }
 
-async function pollUntilTerminal(sessionId: string, baseUrl: string): Promise<'approved' | 'denied' | 'expired'> {
-  const startedAt = Date.now();
-  let lastStatus = '';
-  while (Date.now() - startedAt < POLL_MAX_MS) {
-    const status = await getCliAuthSession(sessionId, { baseUrl });
-    if (status.status !== lastStatus) {
-      if (status.status === 'pending' && lastStatus !== 'pending') {
-        process.stderr.write(`${dim('Waiting for approval...')}\n`);
-      }
-      lastStatus = status.status;
+function pollUntilTerminal(sessionId: string, baseUrl: string): Promise<'approved' | 'denied' | 'expired'> {
+  return pollCliAuthSession(sessionId, {
+    baseUrl,
+    onPending: () => process.stderr.write(`${dim('Waiting for approval...')}\n`),
+    // Once per streak: a long outage should not print a line every 10 s.
+    onRetry: ({ reason, waitMs, consecutiveFailures }) => {
+      if (consecutiveFailures !== 1) return;
+      const why = reason === 'rate_limited' ? 'Login status check was rate limited' : 'Could not reach Genfire';
+      process.stderr.write(`${dim(`${why}; still waiting (retrying in ${Math.ceil(waitMs / 1000)}s)...`)}\n`);
     }
-    if (status.status === 'approved') return 'approved';
-    if (status.status === 'denied') return 'denied';
-    if (status.status === 'expired') return 'expired';
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
-  return 'expired';
+  });
 }
 
 async function validateKey(apiKey: string, baseUrl: string): Promise<{ accountId: string; email: string | null }> {
