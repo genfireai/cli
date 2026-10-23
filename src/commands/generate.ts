@@ -21,6 +21,7 @@ import {
   addImageRequestOptions,
   addVideoRequestOptions,
   buildImageRequest,
+  buildVectorizeRequest,
   buildVideoRequest,
   validateImageFlags,
   validateVideoFlags,
@@ -796,6 +797,27 @@ export function registerGenerateCommands(program: Command): void {
         { idempotencyKey: randomUUID() }
       );
       await maybeFinish(client, run.id, 'cutout', opts);
+    });
+
+  // ---- vectorize (Ideogram image-to-vector) ----
+  // remove-bg's twin: a fixed model, one image in, an SVG out. To generate a
+  // NEW vector from a prompt: `generate image -m image.ideogram_vector`.
+  commonOptions(
+    generate
+      .command('vectorize')
+      .description('Trace an image into a true SVG (Ideogram Vectorize)')
+  , { fileable: true })
+    .requiredOption('--image <urlOrPath>', 'Source image (JPEG, PNG or WebP): URL, local path (auto-uploaded) or a completed run id')
+    .option('--mode <mode>', 'default (finer detail) or simple (fewer, cleaner shapes). Same price')
+    .action(async (opts: CommonGenerateOptions & { image: string; mode?: string }) => {
+      const client = await createClient();
+      const body = await buildVectorizeRequest(opts, async (input) => (await resolveMediaInput(client, input)).url);
+      // Brand-new endpoint: not on the pinned SDK yet (see publicApiRequest).
+      const run = await publicApiRequest<{ id: string }>('POST', '/images/vectorize', {
+        body: { ...body, ...scopeFields(opts) },
+        idempotencyKey: randomUUID()
+      });
+      await maybeFinish(client, run.id, 'vector', opts);
     });
 
   // ---- faceless reel ----

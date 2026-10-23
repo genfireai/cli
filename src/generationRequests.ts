@@ -257,12 +257,12 @@ export function addImageRequestOptions(cmd: Command): Command {
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option(
       '-i, --image <urlOrPath>',
-      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3; Ideogram 4.5 = the source plus up to 4 references)',
+      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3; Ideogram 4.5 = the source plus up to 4 references; Ideogram Vector = up to 5 references)',
       collect,
       [] as string[]
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
-    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 takes low, medium or high (default medium)')
+    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
     .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
@@ -334,6 +334,29 @@ export async function buildImageRequest(opts: ImageFlags, resolveMedia: MediaRes
     control_scale: num(opts.controlScale, '--control-scale'),
     tiling_mode: opts.tilingMode?.trim().toLowerCase(),
     ...(await buildGrounding(opts, resolveMedia))
+  });
+}
+
+// ─── Vectorize (POST /v1/images/vectorize) ───────────────────────────────────
+
+// Mirrored from backend/src/lib/models/ideogramVectorEndpoints.ts
+// (IDEOGRAM_VECTORIZE_MODES), which this package cannot import. Same price.
+export const VECTORIZE_MODES = ['default', 'simple'] as const;
+
+export interface VectorizeFlags {
+  image: string;
+  mode?: string;
+}
+
+/**
+ * The `/v1/images/vectorize` body (minus the run-scoping fields). `mode` is
+ * sent only when given, so the API default applies otherwise.
+ */
+export async function buildVectorizeRequest(opts: VectorizeFlags, resolveMedia: MediaResolver): Promise<Record<string, unknown>> {
+  const mode = oneOf(opts.mode, VECTORIZE_MODES, '--mode');
+  return compact({
+    image_url: await resolveMedia(opts.image),
+    mode
   });
 }
 

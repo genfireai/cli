@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import {
   buildImageRequest,
   buildSpeechExtras,
+  buildVectorizeRequest,
   buildVideoRequest,
   draftFinalPath,
   looksLikePrompt,
@@ -72,7 +73,7 @@ async function runCli(argv: string[]): Promise<Captured[]> {
       payload = { object: 'cost_estimate', model: 'm', capability: 'c', credits: 1, unit: 'total', breakdown: {} };
     } else if (path === '/account/credits') {
       payload = { account_id: 'a', balance: 10, currency: 'credits' };
-    } else if (path.startsWith('/runs/') || path.endsWith('/generations') || path.endsWith('/final')) {
+    } else if (path.startsWith('/runs/') || path.endsWith('/generations') || path.endsWith('/final') || path === '/images/vectorize') {
       payload = run;
     } else if (path.endsWith('/final/estimate')) {
       payload = { object: 'cost_estimate', model: 'video.seedance_2_5', capability: 'video_generation', credits: 470, unit: 'total', breakdown: {}, expires_at: '2026-10-12T12:00:00.000Z' };
@@ -162,6 +163,40 @@ test('Ideogram 4.5: --edit-precision reaches both bodies as edit_precision, iden
   const plain = bodyOf(await runCli(['generate', 'image', 'a logo', '-m', 'image.ideogram_v4_5', '--no-wait']), '/images/generations');
   assert.equal('edit_precision' in plain, false);
   await assert.rejects(buildImageRequest({ editPrecision: 'max' }, passthrough), /--edit-precision must be one of: regular, high/);
+});
+
+test('Ideogram Vector: image.ideogram_vector rides the image body, and generate and cost agree', async () => {
+  const flags = ['-m', 'image.ideogram_vector', '-q', 'high', '-a', '4:1', '-i', 'https://cdn.example/ref.png'];
+  const gen = bodyOf(await runCli(['generate', 'image', 'a fox mark', ...flags, '--no-wait']), '/images/generations');
+  const est = bodyOf(await runCli(['cost', 'image', 'a fox mark', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'a fox mark');
+  // The reference rides into the estimate too: with it, high is the pricier rate.
+  assert.deepEqual(genRest, est, 'a quote stays spendable');
+  assert.equal(gen.model, 'image.ideogram_vector');
+  assert.equal(gen.image_url, 'https://cdn.example/ref.png');
+  assert.equal(gen.aspect_ratio, '4:1');
+});
+
+test('generate vectorize posts image_url (+ mode only when given) to /images/vectorize under an Idempotency-Key', async () => {
+  const calls = await runCli(['generate', 'vectorize', '--image', 'https://cdn.example/logo.png', '--mode', 'Simple', '--project', 'proj_1', '--no-wait']);
+  const hit = calls.find((c) => c.method === 'POST' && c.url.endsWith('/images/vectorize'));
+  assert.ok(hit, 'posted to /images/vectorize');
+  assert.deepEqual(hit!.body, { image_url: 'https://cdn.example/logo.png', mode: 'simple', project_id: 'proj_1' });
+  assert.ok(hit!.headers?.['Idempotency-Key'], 'billable route: the key rides the header');
+  const plain = bodyOf(await runCli(['generate', 'vectorize', '--image', 'https://cdn.example/logo.png', '--no-wait']), '/images/vectorize');
+  assert.equal('mode' in plain, false, 'unset stays unset: the API default applies');
+  // A local path is uploaded first; the body carries the asset URL.
+  const dir = mkdtempSync(join(tmpdir(), 'gf-vec-'));
+  try {
+    const file = join(dir, 'logo.png');
+    writeFileSync(file, 'png');
+    const uploaded = bodyOf(await runCli(['generate', 'vectorize', '--image', file, '--no-wait']), '/images/vectorize');
+    assert.equal(uploaded.image_url, 'https://cdn.example/uploads/logo.png');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  await assert.rejects(buildVectorizeRequest({ image: 'x', mode: 'detailed' }, passthrough), /--mode must be one of: default, simple/);
 });
 
 test('an @element handle in an image prompt no longer dies as an unknown influencer', async () => {

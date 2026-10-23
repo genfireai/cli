@@ -120,6 +120,7 @@ genfire generate 3d      --image ref.png [--rigging] [--pbr] [-o model.glb]
 genfire generate upscale-image --image in.png [-s 4] [-o out.png]
 genfire generate upscale-video --video in.mp4 [-s 2] [-o out.mp4]
 genfire generate remove-bg     --image in.png [-o cutout.png]
+genfire generate vectorize     --image logo.png [--mode simple] [-o logo.svg]
 genfire generate upload  <path>   # raw upload, prints the asset URL
 ```
 
@@ -146,11 +147,13 @@ Model-specific image flags:
 
 | Flag | Values | Applies to |
 |---|---|---|
-| `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2`. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. `image.ideogram_v4_5` takes `low` `medium` `high` (default `medium`), each tier priced on its own. |
+| `--quality` | `low` `medium` `high` `auto` | `image.gpt_image_2`. Defaults to `high`. Cost multiplier: low=1×, medium=6×, high=22×. `image.ideogram_v4_5` and `image.ideogram_vector` take `low` `medium` `high` (default `medium`), each tier priced on its own. |
 | `--resolution` | `1K` `2K` `4K` | `image.nano_banana_2`, `image.nano_banana_2_1`, `image.nano_banana_pro` (generation and edit); `image.grok_imagine_pro` / `image.grok_imagine_2` take 1K or 2K. Cost multiplier: 1K=1×, 2K=1.5×, 4K=3×. `image.ideogram_v4_5` takes 1K or 2K (default 2K) at the same price. |
 | `--edit-precision` | `regular` `high` | `image.ideogram_v4_5` edits only (needs `-i`). `high` is Ideogram's Precise Edit: it changes only what the prompt names and keeps every other pixel intact, at the same price. Default `regular`. |
 
 Ideogram 4.5 (`image.ideogram_v4_5`) is built for posters, logos and designs where the lettering has to come out exactly right: put the exact on-image text in quotes, early in the prompt. For an edit, the first `-i` is the source and up to 4 more are references (3 when you also pass `--mask`).
+
+Ideogram Vector (`image.ideogram_vector`) generates a true SVG — logos, icons, illustrations. It has no `--resolution` (a vector has none) and no `--mask`. Up to 5 `-i` images ride along as references (the first is the primary); with references, `--quality high` costs more, `low` and `medium` do not. To turn an EXISTING image into an SVG, use `genfire generate vectorize --image <file>` instead: `--mode default` keeps finer detail, `--mode simple` traces fewer, cleaner shapes, at the same flat price.
 
 ### Cost preview
 
