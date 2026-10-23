@@ -429,13 +429,13 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
     .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
     .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
-    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6, Hailuo 03/02 Standard)')
-    .option('--start-image <urlOrPath>', 'Kling O3 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
+    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard)')
+    .option('--start-image <urlOrPath>', 'Kling O3 / Kling 4.0 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
     .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add`)
-    .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
-    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
+    .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1 / Kling 4.0, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
+    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 5 on video.kling_v4 (cite as @Video1…; each 3-30s, 30s TOTAL together with element videos — a longer pool is trimmed to fit), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
     .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5, where every window shares the 30s pool)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s), local paths or run ids — cite as Audio 1… (Hailuo 03, Wan 3.0) or @Audio1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0 (2-15s each), 10 on video.seedance_2_5 (each 2-30s and ≤15 MB, 30s TOTAL across the pool), 5 on Wan 3.0 (15s total). Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
     .option('--keyframe <FRAME:urlOrPath>', 'Pin an image at a 24 fps frame index, e.g. --keyframe 0:start.png --keyframe 96:end.png (Flux 3 keyframes-to-video; capabilities.keyframes). Repeatable', collect, [] as string[])
@@ -443,8 +443,8 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--file-url <urlOrPath>', 'Document to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
     .option('--web-url <url>', 'Web page to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
     .option('--lora <id[:scale]>', 'Trained video model (subject LoRA) from `genfire trained-models list`, optional :scale. Repeat for up to 3 (Hailuo 03)', collect, [] as string[])
-    .option('--elements-file <path>', 'Kling O3 elements: JSON array (max 3) of { frontal_image_url | video_url, reference_image_urls?, voice_id? }')
-    .option('--multi-prompt <[SECONDS:]prompt>', 'Kling O3 multi-shot: one shot per flag, optional leading duration, e.g. --multi-prompt "5:she opens the door" --multi-prompt "he waves"', collect, [] as string[])
+    .option('--elements-file <path>', `Kling O3 / Kling 4.0 elements: JSON array of { frontal_image_url | video_url, reference_image_urls?, voice_id? } — up to 3 on Kling O3 (one with a video); up to ${KLING4_MAX_ELEMENTS} on ${KLING4_ALIAS} (up to ${KLING4_MAX_VIDEO_ELEMENTS} with a video), where an image element is a front + 1-3 extra angles (a lone image is used as its own view)`)
+    .option('--multi-prompt <[SECONDS:]prompt>', `Kling O3 / Kling 4.0 multi-shot: one shot per flag, optional leading duration (1-15 s on Kling O3, 1-${KLING4_MAX_SHOT_SECONDS} s on ${KLING4_ALIAS}, whose shots add up to the clip — pass "" as the prompt there), e.g. --multi-prompt "5:she opens the door" --multi-prompt "he waves"`, collect, [] as string[])
     .option('--shot-type <type>', 'Kling O3 multi-shot mode: customize | intelligent')
     .option('--camera-path <preset>', `H3 Max Multi Angle camera move: ${CAMERA_PATH_IDS.join(', ')}`)
     .option('--camera-trajectory <file>', 'H3 Max Multi Angle explicit camera path: JSON array of 2-12 { time, azimuth, elevation, distance } keyframes')
@@ -483,15 +483,31 @@ export function parseRefVideoTrims(specs: string[] | undefined, poolSize: number
   });
 }
 
-/** `[SECONDS:]prompt` → `{ prompt, duration? }` (Kling O3 wants the duration as a string). */
-export function parseMultiPrompt(specs: string[] | undefined): Array<{ prompt: string; duration?: string }> | undefined {
+// ─── Kling 4.0 (video.kling_v4 / video.kling_v4_flash) ──────────────────────
+// The API's seam limits, mirrored for the checks made before anything uploads.
+const KLING4_ALIAS = 'video.kling_v4';
+const KLING4_MAX_ELEMENTS = 7;
+const KLING4_MAX_VIDEO_ELEMENTS = 3;
+const KLING4_MAX_SHOT_SECONDS = 30;
+
+/** Any Kling 4.0 alias (4.0 or Flash). */
+export function isKling4Alias(model?: string): boolean {
+  return /^video\.kling_v4(?:_flash)?$/.test(String(model ?? '').trim().toLowerCase());
+}
+
+/**
+ * `[SECONDS:]prompt` → `{ prompt, duration? }` (Kling O3 wants the duration as
+ * a string). Shots run 1-15 s on Kling O3 and 1-30 s on Kling 4.0 (`model`).
+ */
+export function parseMultiPrompt(specs: string[] | undefined, model?: string): Array<{ prompt: string; duration?: string }> | undefined {
   if (!specs || specs.length === 0) return undefined;
+  const maxShotSeconds = isKling4Alias(model) ? KLING4_MAX_SHOT_SECONDS : 15;
   return specs.map((spec) => {
     const m = /^(\d{1,2})\s*:\s*([\s\S]+)$/.exec(spec);
     if (m) {
       const seconds = Number(m[1]);
-      if (seconds < 1 || seconds > 15) {
-        throw new CliError(`--multi-prompt "${spec}": shot duration must be 1-15 seconds.`, 'invalid_multi_prompt');
+      if (seconds < 1 || seconds > maxShotSeconds) {
+        throw new CliError(`--multi-prompt "${spec}": shot duration must be 1-${maxShotSeconds} seconds.`, 'invalid_multi_prompt');
       }
       return { prompt: m[2].trim(), duration: String(seconds) };
     }
@@ -567,7 +583,7 @@ export function validateVideoFlags(opts: VideoFlags): void {
   // frame there is nothing to interpolate from.
   if (opts.endImage && !opts.image && !opts.startImage) {
     throw new CliError(
-      '--end-image is the LAST frame of an image-to-video clip. Pair it with --image (or --start-image on Kling O3).',
+      '--end-image is the LAST frame of an image-to-video clip. Pair it with --image (or --start-image on Kling O3 / Kling 4.0).',
       'missing_start_frame'
     );
   }
@@ -625,7 +641,7 @@ export function validateVideoFlags(opts: VideoFlags): void {
     throw new CliError('--no-color-match is an H3 Max Insert setting — pass it with --insert-start / --insert-resume.', 'unsupported_color_match');
   }
   parseRefVideoTrims(opts.refVideoTrim, opts.refVideo?.length ?? 0);
-  parseMultiPrompt(opts.multiPrompt);
+  parseMultiPrompt(opts.multiPrompt, opts.model);
   parseLoraSpecs(opts.lora, '--lora', 3);
   for (const spec of opts.keyframe ?? []) {
     if (!/^\d+:.+$/.test(spec)) {
@@ -795,8 +811,16 @@ export async function buildVideoRequest(
   let elements: unknown;
   if (opts.elementsFile) {
     elements = await readJsonFile(opts.elementsFile, '--elements-file');
-    if (!Array.isArray(elements) || elements.length === 0 || elements.length > 3) {
-      throw new CliError('--elements-file must hold a JSON array of 1-3 Kling O3 element objects.', 'invalid_elements');
+    // Kling 4.0 takes up to 7 (the API refuses a 4th element video, or any on
+    // Flash); Kling O3 — and an unnamed model — 3.
+    const maxElements = isKling4Alias(opts.model) ? KLING4_MAX_ELEMENTS : 3;
+    if (!Array.isArray(elements) || elements.length === 0 || elements.length > maxElements) {
+      throw new CliError(
+        isKling4Alias(opts.model)
+          ? `--elements-file must hold a JSON array of 1-${KLING4_MAX_ELEMENTS} Kling 4.0 element objects.`
+          : '--elements-file must hold a JSON array of 1-3 Kling O3 element objects (up to 7 on video.kling_v4).',
+        'invalid_elements'
+      );
     }
   }
   let cameraTrajectory: unknown;
@@ -832,14 +856,16 @@ export async function buildVideoRequest(
     web_url: opts.webUrl,
     loras: parseLoraSpecs(opts.lora, '--lora', 3),
     elements,
-    multi_prompt: parseMultiPrompt(opts.multiPrompt),
+    multi_prompt: parseMultiPrompt(opts.multiPrompt, opts.model),
     shot_type: opts.shotType?.trim().toLowerCase(),
     camera_path: opts.cameraPath?.trim().toLowerCase(),
     camera_trajectory: cameraTrajectory,
     // Only an explicit opt-out is sent. The API defaults to audio on, and the
     // quote fingerprint keys generate_audio only when it is a boolean — so
-    // sending `true` by default made every default quote unspendable.
-    generate_audio: opts.audio === false ? false : genjudo.generate_audio,
+    // sending `true` by default made every default quote unspendable. Kling
+    // 4.0 has no audio toggle at all (the API ignores it), so --no-audio is
+    // not sent there.
+    generate_audio: isKling4Alias(opts.model) ? undefined : opts.audio === false ? false : genjudo.generate_audio,
     // video.seedance_2_5 has no encode setting: --bitrate has no effect there,
     // so it is not sent (the same body for `cost video` and `generate video`).
     bitrate_mode: isGenjudoModel(opts.model) ? undefined : (opts.bitrate ?? opts.bitrateMode),

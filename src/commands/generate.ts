@@ -248,7 +248,7 @@ export function registerGenerateCommands(program: Command): void {
     generate
       .command('video [prompt]')
       .usage('<prompt> [options]')
-      .description('Generate a video from a prompt — text, start/end frame, first/last frame, references, source clip, keyframes or Kling O3 elements. @<handle> binds an influencer or element on reference-capable models.')
+      .description('Generate a video from a prompt — text, start/end frame, first/last frame, references, source clip, keyframes or Kling O3 / Kling 4.0 elements. @<handle> binds an influencer or element on reference-capable models.')
   , { fileable: true }))
     .option('--save-last-frame', SAVE_LAST_FRAME_HELP)
     .action(async (promptArg: string | undefined, opts: CommonGenerateOptions & VideoFlags) => {

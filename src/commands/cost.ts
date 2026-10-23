@@ -74,7 +74,7 @@ export function registerCostCommand(program: Command): void {
       .command('video [prompt]')
       .description('Estimate the credit cost of a video generation — accepts every `generate video` flag, so references, source clips, Genjudo tasks and LoRAs route (and price) like the real call')
   )
-    .option('-n, --count <n>', 'Number of clips to price (estimate only — each `generate video` run makes one). video.seedance_2_5 renders one video per request: a count above 1 is clamped to 1 and quoted as one clip')
+    .option('-n, --count <n>', 'Number of clips to price (estimate only — each `generate video` run makes one). video.seedance_2_5 and Kling 4.0 (video.kling_v4*) render one video per request: a count above 1 is clamped to 1 and quoted as one clip')
     .option('--image-url <url>', 'Deprecated alias of --image')
     .option('--reference-image-urls <urls>', 'Deprecated: comma-separated form of --ref-image')
     .action(async (prompt: string | undefined, opts: VideoFlags & { count?: string; imageUrl?: string; referenceImageUrls?: string }) => {
