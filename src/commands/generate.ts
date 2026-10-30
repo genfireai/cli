@@ -306,7 +306,7 @@ export function registerGenerateCommands(program: Command): void {
       .command('speech [text]')
       .description('Synthesize speech from text — or a multi-voice dialogue with --dialogue-file (speech.elevenlabs_dialogue_v4, or _v3 via -m)')
   , { fileable: true })
-    .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit)')
+    .option('--voice-id <id>', 'Voice id to use (required for ElevenLabs models; for speech.seed_audio_1_0 pass a Seed preset name or omit; for speech.gemini_3_8_flash_tts / _lite_tts pass a prebuilt voice name like Kore, Puck or Charon, or omit)')
     .option('-m, --model <model>', 'Speech model alias (default speech.elevenlabs_v4_turbo, or speech.elevenlabs_flash_v2_5 past 10,000 characters, with --speed, or for an account-cloned voice; speech.elevenlabs_v4 = most expressive)')
     .option('--voice-name <name>', 'Optional friendly voice name for logs')
     .option('--format <format>', 'Output format, e.g. mp3_44100_128 (Seed Audio: wav|mp3|pcm|ogg_opus)')
@@ -326,9 +326,10 @@ export function registerGenerateCommands(program: Command): void {
     .option('--dialogue-file <path>', 'JSON array of { text, voice_id } lines for a multi-voice dialogue (implies -m speech.elevenlabs_dialogue_v4; pass -m speech.elevenlabs_dialogue_v3 for v3; 2000 characters, 10 voices max)')
     .option('--stability <0-1>', 'Voice stability (ElevenLabs; also read by dialogue)')
     .option('--voice-settings <json>', 'Raw ElevenLabs voice_settings object, e.g. \'{"similarity_boost":0.8,"style":0.3}\'')
+    .option('--style <text>', 'Delivery direction — tone, pace, accent — not spoken or billed (Gemini TTS only)')
     .option('--title <title>', 'Optional title for the run')
     .action(async (textArg: string | undefined, opts: CommonGenerateOptions & SpeechExtraFlags & {
-      model?: string; voiceId?: string; voiceName?: string; format?: string;
+      model?: string; voiceId?: string; voiceName?: string; format?: string; style?: string;
       audioUrl?: string[]; imageUrl?: string; sampleRate?: string; speed?: string; volume?: string; pitch?: string;
       language?: string; seed?: string; previousText?: string; nextText?: string; normalize?: string; timestamps?: boolean;
       title?: string;
@@ -361,6 +362,7 @@ export function registerGenerateCommands(program: Command): void {
           speed: opts.speed ? Number(opts.speed) : undefined,
           volume: opts.volume ? Number(opts.volume) : undefined,
           pitch: opts.pitch ? Number(opts.pitch) : undefined,
+          style_instructions: opts.style,
           ...scopeFields(opts)
         } as any,
         { idempotencyKey: randomUUID() }

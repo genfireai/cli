@@ -263,7 +263,7 @@ export function addImageRequestOptions(cmd: Command): Command {
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
     .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
-    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price)')
+    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
     .option('--moodboard-strength <level>', `How hard the moodboard steers: ${MOODBOARD_STRENGTHS.join(', ')}`)
@@ -397,6 +397,20 @@ export function isH3MaxRecastAlias(model?: string): boolean {
   return normalized.includes('h3_max_recast') || normalized.includes('hailuo_03_max_recast');
 }
 
+// H3 Max Relight — mirrored from backend/src/lib/models/h3MaxRelight.ts
+// (H3_MAX_RELIGHT_PUBLIC_ALIAS / _RESOLUTIONS / _MAX_SOURCE_SECONDS). The clip
+// rides --source-video and the ONE lighting image --ref-image (or --image,
+// which the API folds into it). No prompt field: the prompt argument is
+// ignored. The API measures the clip and stays the validator of record.
+export const H3_MAX_RELIGHT_ALIAS = 'video.hailuo_03_max_relight';
+const H3_MAX_RELIGHT_RESOLUTIONS = ['480p', '768p', '1080p', '2k'] as const;
+
+/** True for the Relight alias however it is spelled (the seam's own normalisation). */
+export function isH3MaxRelightAlias(model?: string): boolean {
+  const normalized = String(model || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return normalized.includes('h3_max_relight') || normalized.includes('hailuo_03_max_relight');
+}
+
 /** `Low Poly`, `low-poly`, `retro-toon-70s` → the canonical id, or undefined. */
 export function normalizeVideoStyle(value: string): (typeof H3_MAX_STYLE_IDS)[number] | undefined {
   const id = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -447,21 +461,21 @@ export interface VideoFlags extends GroundingFlags {
 
 export function addVideoRequestOptions(cmd: Command): Command {
   cmd
-    .option('-m, --model <model>', 'Public model alias, e.g. video.veo_3_1 (default: the API default video model)')
+    .option('-m, --model <model>', 'Public model alias, e.g. video.kling_v4 (default: the API default video model)')
     .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). Genjudo runs (video.seedance_2_5 with a --ref-video, any --task) default to auto: the clip\'s own frame — the API applies the same default to a one-clip run')
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
     .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
     .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
-    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard)')
+    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard, Flux 3 Max)')
     .option('--start-image <urlOrPath>', 'Kling O3 / Kling 4.0 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
-    .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add`)
+    .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add. On ${H3_MAX_RELIGHT_ALIAS} it is the clip to relight (up to 15s; billed per second of it) — pass ONE lighting image with --ref-image and "" as the prompt`)
     .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1 / Kling 4.0, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
     .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 5 on video.kling_v4 (cite as @Video1…; each 3-30s, 30s TOTAL together with element videos — a longer pool is trimmed to fit), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
     .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5, where every window shares the 30s pool)')
     .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s), local paths or run ids — cite as Audio 1… (Hailuo 03, Wan 3.0) or @Audio1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0 (2-15s each), 10 on video.seedance_2_5 (each 2-30s and ≤15 MB, 30s TOTAL across the pool), 5 on Wan 3.0 (15s total). Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
-    .option('--keyframe <FRAME:urlOrPath>', 'Pin an image at a 24 fps frame index, e.g. --keyframe 0:start.png --keyframe 96:end.png (Flux 3 keyframes-to-video; capabilities.keyframes). Repeatable', collect, [] as string[])
+    .option('--keyframe <FRAME:urlOrPath>', 'Pin an image at a 24 fps frame index, e.g. --keyframe 0:start.png --keyframe 96:end.png (Flux 3 / Flux 3 Max keyframes-to-video; capabilities.keyframes). Repeatable', collect, [] as string[])
     .option('--draft-cache-url <url>', 'Flux 3 draft-enhance: the draft_cache_url a previous /draft run returned')
     .option('--file-url <urlOrPath>', 'Document to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
     .option('--web-url <url>', 'Web page to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
@@ -588,9 +602,36 @@ export function validateRecastFlags(opts: VideoFlags): void {
   }
 }
 
+/**
+ * H3 Max Relight's input shape, refused locally before anything uploads: the
+ * clip and ONE lighting image (--ref-image, or --image) are both required, and
+ * it has no reference clip / audio pool. A no-op for every other model.
+ */
+export function validateRelightFlags(opts: VideoFlags): void {
+  if (!isH3MaxRelightAlias(opts.model)) return;
+  if (!opts.sourceVideo) {
+    throw new CliError('H3 Max Relight relights an existing clip — pass it with --source-video (up to 15s; a longer clip uses its first 15s).', 'source_video_url_required');
+  }
+  const lights = (opts.refImage?.length ?? 0) + (opts.image ? 1 : 0);
+  if (lights === 0) {
+    throw new CliError('H3 Max Relight needs a lighting image — pass ONE with --ref-image (a sphere render of the light you want).', 'reference_image_urls_required');
+  }
+  if (lights > 1) {
+    throw new CliError('H3 Max Relight takes ONE lighting image (--ref-image or --image, not both / not several).', 'invalid_reference_image_urls');
+  }
+  if (opts.refVideo?.length || opts.refAudio?.length) {
+    throw new CliError('H3 Max Relight takes one lighting image only — no --ref-video or --ref-audio (the clip keeps its own sound).', 'unsupported_reference_media');
+  }
+  const resolution = opts.resolution?.trim();
+  if (resolution !== undefined && !(H3_MAX_RELIGHT_RESOLUTIONS as readonly string[]).includes(resolution)) {
+    throw new CliError(`H3 Max Relight renders ${H3_MAX_RELIGHT_RESOLUTIONS.join(', ')} (got "${opts.resolution}").`, 'invalid_resolution');
+  }
+}
+
 /** Validation that needs no network — runs before anything is uploaded. */
 export function validateVideoFlags(opts: VideoFlags): void {
   validateRecastFlags(opts);
+  validateRelightFlags(opts);
   const style = opts.style !== undefined ? normalizeVideoStyle(opts.style) : undefined;
   if (opts.style !== undefined && !style) {
     throw new CliError(`--style must be one of: ${H3_MAX_STYLE_IDS.join(', ')} (got "${opts.style}").`, 'invalid_video_style');

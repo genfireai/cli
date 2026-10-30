@@ -53,10 +53,14 @@ const CLI_DEFAULT_SCOPES = [
   'moodboards:read',
   'projects:read',
   'projects:write',
+  'designs:read',
+  'designs:write',
   'marketing:read',
   'teams:read',
   'tasks:read',
-  'tasks:write'
+  'tasks:write',
+  'agent:read',
+  'agent:write'
 ] as const;
 
 async function tryOpenBrowser(url: string): Promise<boolean> {

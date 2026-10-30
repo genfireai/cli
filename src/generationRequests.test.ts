@@ -332,6 +332,37 @@ test('H3 Max Recast flag validation fails before anything uploads — and only o
   assert.doesNotThrow(() => validateVideoFlags({ model: 'video.hailuo_03_max_3d', sourceVideo: 'src.mp4' }));
 });
 
+test('H3 Max Relight: clip + ONE lighting image, identically on cost and generate, with an empty prompt', async () => {
+  const flags = [
+    '-m', 'video.hailuo_03_max_relight', '--source-video', 'https://cdn.example/src.mp4',
+    '--ref-image', 'https://cdn.example/sphere.png', '-r', '2k'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'video', '', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, '');
+  assert.deepEqual(genRest, est);
+  assert.equal(est.model, 'video.hailuo_03_max_relight');
+  assert.deepEqual(est.reference_image_urls, ['https://cdn.example/sphere.png']);
+  assert.equal(est.resolution, '2k');
+  assert.equal('duration' in est, false);
+});
+
+test('H3 Max Relight flag validation fails before anything uploads — and only on Relight', () => {
+  const relight = { model: 'video.hailuo_03_max_relight', sourceVideo: 'src.mp4', refImage: ['sphere.png'] };
+  assert.doesNotThrow(() => validateVideoFlags(relight));
+  // --image is accepted as the lighting image too.
+  assert.doesNotThrow(() => validateVideoFlags({ ...relight, refImage: undefined, image: 'sphere.png' }));
+  for (const resolution of ['480p', '768p', '1080p', '2k']) assert.doesNotThrow(() => validateVideoFlags({ ...relight, resolution }));
+  assert.throws(() => validateVideoFlags({ ...relight, sourceVideo: undefined }), /--source-video/);
+  assert.throws(() => validateVideoFlags({ ...relight, refImage: undefined }), /needs a lighting image/);
+  assert.throws(() => validateVideoFlags({ ...relight, refImage: ['a', 'b'] }), /ONE lighting image/);
+  assert.throws(() => validateVideoFlags({ ...relight, image: 'start.png' }), /ONE lighting image/);
+  assert.throws(() => validateVideoFlags({ ...relight, refVideo: ['r.mp4'] }), /no --ref-video/);
+  assert.throws(() => validateVideoFlags({ ...relight, resolution: '720p' }), /renders 480p, 768p, 1080p, 2k/);
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.hailuo_03_max', resolution: '480p' }));
+});
+
 test('image builder: styles, Z-Image tuning and grounding', async () => {
   const body = await buildImageRequest({
     model: 'image.z_image_turbo',

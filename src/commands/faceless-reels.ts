@@ -74,22 +74,167 @@ export function registerFacelessReelsCommand(program: Command): void {
     .option('-p, --preset <id>', 'Niche preset id')
     .option('-d, --duration <seconds>', 'Target length in seconds (10–600, up to 10 minutes)')
     .option('--music-source <source>', 'none | preset | ai | library', 'none')
-    .action(async (opts: { preset?: string; duration?: string; musicSource?: string }) => {
-      const client = await createClient();
-      const estimate = await client.estimateFacelessReelCost({
+    .option('-e, --episodes <n>', 'Series size 1-4: quote per-episode credits × episodes')
+    .action(async (opts: { preset?: string; duration?: string; musicSource?: string; episodes?: string }) => {
+      const body = {
         preset_id: opts.preset,
         target_duration_sec: opts.duration ? Number(opts.duration) : undefined,
-        music: opts.musicSource ? { source: opts.musicSource as 'none' | 'preset' | 'ai' | 'library' } : undefined
-      });
+        music: opts.musicSource ? { source: opts.musicSource as 'none' | 'preset' | 'ai' | 'library' } : undefined,
+        ...(opts.episodes ? { episodes: Number(opts.episodes) } : {}),
+      };
+      const estimate = await publicApiRequest<Record<string, any>>('POST', '/faceless-reels/estimate-cost', { body });
       printResult(estimate, () => {
         process.stdout.write(
           `${dim('scenes:')}    ${estimate.sceneCount}\n` +
           `${dim('images:')}    ${estimate.images}\n` +
           `${dim('voiceover:')} ${estimate.voiceover}\n` +
           `${dim('music:')}     ${estimate.music}\n` +
-          `${dim('total:')}     ${estimate.total} credits\n`
+          `${dim('total:')}     ${estimate.total} credits\n` +
+          (estimate.series_total !== undefined ? `${dim('series:')}    ${estimate.episodes} episodes × ${estimate.per_episode_total} = ${estimate.series_total} credits\n` : '')
         );
       });
+    });
+
+  // ── Series (1-4 episodes, one continuous story) ──────────────────────────────
+
+  const series = reels
+    .command('series')
+    .description('Faceless SERIES: 1-4 episodes of one continuous story, posted in order');
+
+  type SeriesOpts = {
+    episodes?: string; channel?: string; preset?: string; duration?: string; aspect?: string;
+    style?: string; voice?: string; spacing?: string; target?: string[]; premise?: string; tone?: string; world?: string;
+  };
+  const seriesBody = (topic: string, opts: SeriesOpts) => ({
+    topic,
+    ...(opts.episodes ? { episodes: Number(opts.episodes) } : {}),
+    ...(opts.channel ? { subscription_id: opts.channel } : {}),
+    ...(opts.preset ? { preset_id: opts.preset } : {}),
+    ...(opts.duration ? { target_duration_sec: Number(opts.duration) } : {}),
+    ...(opts.aspect ? { aspect_ratio: opts.aspect } : {}),
+    ...(opts.style ? { style_id: opts.style } : {}),
+    ...(opts.voice ? { voice_id: opts.voice } : {}),
+    ...(opts.spacing ? { publish_spacing_hours: Number(opts.spacing) } : {}),
+    ...(opts.target?.length ? { targets: opts.target } : {}),
+    ...(opts.premise || opts.tone || opts.world ? { series_bible: { premise: opts.premise, tone: opts.tone, world: opts.world } } : {}),
+  });
+  const withSeriesOptions = (cmd: Command) => cmd
+    .option('-e, --episodes <n>', 'Episodes 1-4 (default 3)')
+    .option('-c, --channel <id>', 'File under this channel (its settings + accounts, posted in order)')
+    .option('-p, --preset <id>', 'Without a channel: niche preset id (what-if-*) or saved format (cp_…)')
+    .option('-d, --duration <seconds>', 'Seconds per episode (8-600)')
+    .option('--aspect <ratio>', '9:16 | 16:9')
+    .option('--style <id>', 'Visual style id')
+    .option('--voice <id>', 'Narrator voice id')
+    .option('--spacing <hours>', 'Hours between episode posts (0-168)')
+    .option('--target <platform:account>', 'Without a channel: account to post to (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+    .option('--premise <text>', 'Series bible: premise')
+    .option('--tone <text>', 'Series bible: tone')
+    .option('--world <text>', 'Series bible: world and its rules');
+
+  withSeriesOptions(series.command('estimate <topic>').description('Quote a series (per-episode credits × episodes)'))
+    .action(async (topic: string, opts: SeriesOpts) => {
+      const result = await publicApiRequest<Record<string, any>>('POST', '/faceless-reels/series/estimate', { body: seriesBody(topic, opts) });
+      printResult(result, () => {
+        process.stdout.write(`${dim('Engine:')}   ${result.engine} ${dim(`(${result.aspect_ratio}, ${result.target_duration_sec}s per episode)`)}\n`);
+        process.stdout.write(`${dim('Total:')}    ${result.episodes} × ${result.per_episode_total} = ${result.total} credits\n`);
+      });
+    });
+
+  withSeriesOptions(series.command('create <topic>').description('Plan + start a series (bills credits per episode; async runs)'))
+    .action(async (topic: string, opts: SeriesOpts) => {
+      if (topic.trim().length < 3) throw new CliError('topic must be at least 3 characters', 'invalid_series_topic');
+      const result = await publicApiRequest<Record<string, any>>('POST', '/faceless-reels/series', { body: seriesBody(topic, opts), idempotencyKey: randomUUID() });
+      printResult(result, () => {
+        process.stderr.write(`${dim('Series:')} ${cyan(result.id)} ${result.title} ${dim(`(${result.status})`)}\n`);
+        for (const ep of result.episodes ?? []) {
+          process.stderr.write(`  ${ep.index}. ${ep.title} ${dim(ep.run_id ? `run ${ep.run_id}` : (ep.error || ''))}\n`);
+        }
+        process.stderr.write(`${dim('Check it with:')} genfire faceless-reels series get ${result.id}\n`);
+      });
+    });
+
+  series
+    .command('list')
+    .description('List your series')
+    .option('-c, --channel <id>', 'Only series under this channel')
+    .action(async (opts: { channel?: string }) => {
+      const result = await publicApiRequest<Record<string, any>>('GET', `/faceless-reels/series${opts.channel ? `?subscription_id=${encodeURIComponent(opts.channel)}` : ''}`);
+      printResult(result, () => {
+        printTable(
+          (result.data ?? []).map((s: any) => ({ id: s.id, title: s.title, status: s.status, episodes: s.episode_count, released: s.publish?.released_through ?? 0 })),
+          ['id', 'title', 'status', 'episodes', 'released']
+        );
+      });
+    });
+
+  series
+    .command('get <id>')
+    .description('Show a series: bible, episodes, release progress')
+    .action(async (id: string) => {
+      const result = await publicApiRequest<Record<string, any>>('GET', `/faceless-reels/series/${encodeURIComponent(id)}`);
+      printResult(result, () => {
+        process.stdout.write(`${cyan(result.title)} ${dim(`(${result.status})`)}\n${dim('Premise:')} ${result.bible?.premise ?? ''}\n`);
+        printTable(
+          (result.episodes ?? []).map((e: any) => ({ '#': e.index, title: e.title, status: e.status, released: e.released ? 'yes' : '', video: e.video_url ?? '' })),
+          ['#', 'title', 'status', 'released', 'video']
+        );
+      });
+    });
+
+  series
+    .command('release <id>')
+    .description('Post every episode that is next in line (normally automatic)')
+    .action(async (id: string) => {
+      const result = await publicApiRequest<Record<string, any>>('POST', `/faceless-reels/series/${encodeURIComponent(id)}/release`, { body: {} });
+      printResult(result, () => process.stdout.write(`${dim('Released:')} ${(result.released ?? []).join(', ') || 'nothing new'}\n`));
+    });
+
+  // ── Saved formats + per-line voiceover redo ─────────────────────────────────
+
+  reels
+    .command('preset-from-link <url>')
+    .description('Save a TikTok / Reel / Short\'s FORMAT as a reusable preset (never its audio, script or footage; bills one video analysis)')
+    .option('-l, --label <name>', 'Name for the saved format')
+    .action(async (url: string, opts: { label?: string }) => {
+      const result = await publicApiRequest<Record<string, any>>('POST', '/faceless-reels/custom-presets/from-link', {
+        body: { url, ...(opts.label ? { label: opts.label } : {}) },
+        idempotencyKey: randomUUID(),
+      });
+      printResult(result, () => {
+        process.stdout.write(`${dim('Saved:')} ${cyan(result.id)} ${result.label}\n`);
+        process.stdout.write(`${dim('Hook:')}  ${result.format?.hook_pattern ?? ''}\n${dim('Cuts:')}  every ~${result.format?.shot_length_sec ?? '?'}s${result.format?.measured ? '' : ' (inferred)'}\n`);
+        process.stdout.write(`${dim('Use it with:')} --preset ${result.id}\n`);
+      });
+    });
+
+  reels
+    .command('saved-presets')
+    .description('List your saved formats (cp_… ids)')
+    .action(async () => {
+      const result = await publicApiRequest<Record<string, any>>('GET', '/faceless-reels/custom-presets');
+      printResult(result, () => {
+        printTable((result.data ?? []).map((p: any) => ({ id: p.id, label: p.label, style: p.recommended_style_id, length: p.target_duration_sec })), ['id', 'label', 'style', 'length']);
+      });
+    });
+
+  reels
+    .command('redo-line <reelId> [line]')
+    .description('List an episode\'s voiceover lines, or re-voice ONE line (only compose + captions re-run)')
+    .option('-t, --text <words>', 'New words for the line (omit for a fresh read)')
+    .action(async (reelId: string, line: string | undefined, opts: { text?: string }) => {
+      const base = `/faceless-reels/reels/${encodeURIComponent(reelId)}/voiceover-lines`;
+      if (line === undefined) {
+        const result = await publicApiRequest<Record<string, any>>('GET', base);
+        printResult(result, () => {
+          printTable((result.data ?? []).map((l: any) => ({ line: l.index, start: l.start_sec ?? '', text: l.text })), ['line', 'start', 'text']);
+        });
+        return;
+      }
+      const n = Number(line);
+      if (!Number.isInteger(n) || n < 0) throw new CliError('line must be a 0-based line number', 'invalid_line');
+      const result = await publicApiRequest<Record<string, any>>('POST', `${base}/${n}/redo`, { body: opts.text ? { text: opts.text } : {} });
+      printResult(result, () => process.stderr.write(`${dim('Re-rendering line')} ${result.line} ${dim(`(${result.status}${result.shift_sec ? `, later lines shift ${result.shift_sec}s` : ''})`)}\n`));
     });
 
   // ── Subscriptions ("Stories") ────────────────────────────────────────────────

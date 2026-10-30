@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { registerRuntimeCommands } from './commands/runtime.js';
+import { registerBladeCommand } from './commands/blade.js';
 import { Command } from 'commander';
 import { formatError } from './errors.js';
 import { setGlobalFlags } from './output.js';
@@ -42,6 +43,8 @@ import { registerTrainingCommands } from './commands/training.js';
 import { registerComposeCommand } from './commands/compose.js';
 import { registerMarketingCommand } from './commands/marketing.js';
 import { registerTasksCommand } from './commands/tasks.js';
+import { registerAgentCommand } from './commands/agent.js';
+import { registerRunLifecycleCommands } from './commands/exports.js';
 import { isInteractiveTty, launchTui } from './tui/launch.js';
 
 import { VERSION } from './versionCheck.js';
@@ -70,8 +73,10 @@ async function main(): Promise<void> {
   registerCostCommand(program);
   registerMediaCommands(program);
   registerRuntimeCommands(program);
+  registerBladeCommand(program);
   registerWorkflowCommands(program);
   registerTimelineCommands(program);
+  registerRunLifecycleCommands(program); // runs cancel/delete, timeline export, export (after runs + timeline)
   registerPresetCommands(program);
   registerGediCommand(program);
   registerFacelessReelsCommand(program);
@@ -99,6 +104,7 @@ async function main(): Promise<void> {
   registerComposeCommand(program);
   registerMarketingCommand(program);
   registerTasksCommand(program);
+  registerAgentCommand(program);
 
   // No subcommand + interactive terminal? Drop into the TUI shell.
   // No subcommand + piped/CI? Print help and exit (preserves scriptability).

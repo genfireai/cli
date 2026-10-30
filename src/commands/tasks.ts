@@ -31,6 +31,19 @@ interface ScheduledTask {
   runs_at?: string;
 }
 
+/** One run from `/v1/tasks/{id}/runs` (a schedule tick, a test run, an event fire). */
+interface TaskRun {
+  id: string;
+  trigger: string;
+  test: boolean;
+  status: 'queued' | 'running' | 'ok' | 'degraded' | 'failed' | 'needs_approval';
+  credits: { total: number; generations: number; tokens: number } | null;
+  outputs: Array<{ run_id: string }>;
+  error: string | null;
+  duration_ms: number | null;
+  approval: { summary: string; suggested_max_credits: number } | null;
+}
+
 const CADENCES = ['once', 'daily', 'weekly', 'monthly'];
 
 export function registerTasksCommand(program: Command): void {
@@ -148,6 +161,83 @@ export function registerTasksCommand(program: Command): void {
         process.stdout.write(
           `${green('✓')} Updated ${task.id} ${dim(`(active=${task.active}, email=${task.delivery.email}, slack=${task.delivery.slack})`)}\n`
         );
+      });
+    });
+
+  tasks
+    .command('run <taskId>')
+    .description('Run a task now. A test run by default: no schedule move, no failure streak, no report sent')
+    .option('--real', 'A real off-schedule fire (counts like a scheduled run)')
+    .option('--deliver', 'Send the email/Slack report')
+    .action(async (taskId: string, opts: { real?: boolean; deliver?: boolean }) => {
+      const run = await publicApiRequest<TaskRun>('POST', `/tasks/${encodeURIComponent(taskId)}/run`, {
+        body: { test: !opts.real, ...(opts.deliver ? { deliver: true } : {}) }
+      });
+      printResult(run, () => {
+        process.stdout.write(`${green('✓')} Started ${run.id} ${dim(`(${opts.real ? 'real' : 'test'} run)`)}\n`);
+        process.stdout.write(dim(`Follow it: genfire tasks runs ${taskId}\n`));
+      });
+    });
+
+  tasks
+    .command('runs <taskId>')
+    .description('Run history: status, credits, outputs, errors and duration of each run')
+    .option('--limit <n>', 'How many (1–50)', '20')
+    .action(async (taskId: string, opts: { limit: string }) => {
+      const response = await publicApiRequest<{ object: 'list'; data: TaskRun[] }>(
+        'GET', `/tasks/${encodeURIComponent(taskId)}/runs?limit=${encodeURIComponent(opts.limit)}`
+      );
+      printResult(response, () => {
+        if (!response.data?.length) {
+          process.stdout.write(`${dim(`No runs yet. Try one: genfire tasks run ${taskId}`)}\n`);
+          return;
+        }
+        printTable(
+          response.data.map((r) => ({
+            id: r.id,
+            trigger: r.test ? `${r.trigger} (test)` : r.trigger,
+            status: r.status,
+            credits: r.credits?.total ?? 0,
+            outputs: r.outputs?.length ?? 0,
+            seconds: r.duration_ms == null ? '' : Math.round(r.duration_ms / 1000),
+            note: (r.approval?.summary || r.error || '').replace(/\s+/g, ' ').slice(0, 50)
+          })),
+          ['id', 'trigger', 'status', 'credits', 'outputs', 'seconds', 'note']
+        );
+      });
+    });
+
+  tasks
+    .command('approve <taskId> <runId>')
+    .description('Continue a run that stopped with needs_approval (it may spend up to --max-credits)')
+    .option('--max-credits <n>', 'Ceiling for the continuation (default: the suggested amount)')
+    .action(async (taskId: string, runId: string, opts: { maxCredits?: string }) => {
+      const maxCredits = opts.maxCredits === undefined ? undefined : Number(opts.maxCredits);
+      if (maxCredits !== undefined && (!Number.isFinite(maxCredits) || maxCredits <= 0)) {
+        throw new CliError('--max-credits must be a positive number', 'invalid_max_credits');
+      }
+      const run = await publicApiRequest<TaskRun>(
+        'POST', `/tasks/${encodeURIComponent(taskId)}/runs/${encodeURIComponent(runId)}/approve`,
+        { body: maxCredits !== undefined ? { max_credits: maxCredits } : {} }
+      );
+      printResult(run, () => {
+        process.stdout.write(`${green('✓')} Approved — continuing as ${run.id}\n`);
+      });
+    });
+
+  tasks
+    .command('budget <taskId> <maxCredits>')
+    .description('Set the per-run credit ceiling (a run that would go over stops for approval)')
+    .action(async (taskId: string, raw: string) => {
+      const maxCredits = Number(raw);
+      if (!Number.isFinite(maxCredits) || maxCredits <= 0) {
+        throw new CliError('maxCredits must be a positive number', 'invalid_max_credits');
+      }
+      const task = await publicApiRequest<ScheduledTask>('PATCH', `/tasks/${encodeURIComponent(taskId)}`, {
+        body: { max_credits_per_run: maxCredits }
+      });
+      printResult(task, () => {
+        process.stdout.write(`${green('✓')} ${task.id} ${dim(`max ${task.max_credits_per_run} credits per run`)}\n`);
       });
     });
 
