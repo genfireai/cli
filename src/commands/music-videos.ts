@@ -89,7 +89,7 @@ export function registerMusicVideosCommand(program: Command): void {
     .option('--song-prompt <text>', 'Generate the song inline instead: what it should sound like')
     .option('--song-duration <ms>', 'Inline song length in milliseconds (10000–600000)')
     .option('--instrumental', 'Inline song only: generate without vocals')
-    .option('--transcribe-lyrics', 'Transcribe a bring-your-own song to derive lyrics + word timings (billed per second)')
+    .option('--transcribe-lyrics', 'Deprecated, no effect: every song is read automatically at no charge')
     .option('-a, --aspect-ratio <ratio>', '9:16 (default) or 16:9')
     .option('--scene-density <level>', 'low | medium | high')
     .option('--lyric-captions', 'Burn karaoke-style lyric captions')
