@@ -278,7 +278,7 @@ export function addImageRequestOptions(cmd: Command): Command {
     .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2 / image.gpt_image_25_*; image.gpt_image_26_* prices its own ladder, low 4x / medium 20x / high 22x, so quote it with `genfire cost image`) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
     .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
-    .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')} (image.gpt_image_26_sunburst / image.gpt_image_26_flare only). gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector from a text prompt (no -i), plus a flat vectorizing fee. Both make one output whatever -n says`)
+    .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')} (image.gpt_image_26_sunburst / image.gpt_image_26_flare only). gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector (with -i the edit renders, then is vectorized), plus a vectorizing fee. Both make one output whatever -n says`)
     .option('--reasoning-effort <level>', `How much GPT Image 2.6 plans before drawing: ${IMAGE_REASONING_EFFORTS.join(', ')} (default high — best for dense text and layouts; lower is faster). No extra cost`)
     .option('--complexity <level>', 'Alias of --reasoning-effort (OpenAI\'s name for it)')
     .option('--frame-count <n>', 'GIF frames, 2-16 (default 9; with --output-format gif). At most 12 are sent and billed — the run\'s notes say so')
@@ -500,7 +500,7 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
     .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
     .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
-    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard, Flux 3 Max)')
+    .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0); on video.kling_v4 it also rides beside --ref-image / --ref-video / --elements-file, start optional (each frame counts toward its 10 images). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard, Flux 3 Max)')
     .option('--start-image <urlOrPath>', 'Kling O3 / Kling 4.0 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
@@ -680,10 +680,13 @@ export function validateVideoFlags(opts: VideoFlags): void {
     throw new CliError('--damage-level is the VHS tape wear — pass it with --style vhs.', 'unsupported_damage_level');
   }
   // The end frame is where an image-to-video clip lands — without a start
-  // frame there is nothing to interpolate from.
-  if (opts.endImage && !opts.image && !opts.startImage) {
+  // frame there is nothing to interpolate from. Kling 4.0 (not Flash) also
+  // takes an end frame beside references, where the start is optional.
+  const kling4EndBesideReferences = String(opts.model ?? '').trim().toLowerCase() === KLING4_ALIAS
+    && Boolean(opts.refImage?.length || opts.refVideo?.length || opts.elementsFile);
+  if (opts.endImage && !opts.image && !opts.startImage && !kling4EndBesideReferences) {
     throw new CliError(
-      '--end-image is the LAST frame of an image-to-video clip. Pair it with --image (or --start-image on Kling O3 / Kling 4.0).',
+      '--end-image is the LAST frame of an image-to-video clip. Pair it with --image (or --start-image on Kling O3 / Kling 4.0), or on video.kling_v4 send it beside --ref-image / --ref-video / --elements-file.',
       'missing_start_frame'
     );
   }

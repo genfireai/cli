@@ -56,3 +56,16 @@ test('Kling 4 has no audio toggle: --no-audio is not sent there (the API ignores
   const other = await buildVideoRequest({ model: 'video.kling_o3', audio: false }, passthrough);
   assert.equal(other.generate_audio, false);
 });
+
+test('Kling 4.0 takes --end-image beside references without a start frame; elsewhere it still needs one', async () => {
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.kling_v4', endImage: 'end.png', refImage: ['ref.png'] }));
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.kling_v4', endImage: 'end.png', refVideo: ['clip.mp4'] }));
+  const body = await buildVideoRequest({ model: 'video.kling_v4', endImage: 'end.png', refImage: ['ref.png'] }, passthrough);
+  assert.equal(body.end_image_url, 'https://cdn.example/end.png');
+  assert.deepEqual(body.reference_image_urls, ['https://cdn.example/ref.png']);
+  // No references → image-to-video's end frame, which needs its start.
+  assert.throws(() => validateVideoFlags({ model: 'video.kling_v4', endImage: 'end.png' }), /--end-image/);
+  // Flash has no end frame (the API's 400) and other models keep the check.
+  assert.throws(() => validateVideoFlags({ model: 'video.kling_v4_flash', endImage: 'end.png', refImage: ['ref.png'] }), /--end-image/);
+  assert.throws(() => validateVideoFlags({ model: 'video.seedance_2_5', endImage: 'end.png', refImage: ['ref.png'] }), /--end-image/);
+});
