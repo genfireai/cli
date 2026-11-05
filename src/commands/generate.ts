@@ -212,7 +212,7 @@ export function registerGenerateCommands(program: Command): void {
   addImageRequestOptions(commonOptions(
     generate
       .command('image <prompt>')
-      .description('Generate one or more images from a prompt. Use @<handle> for a trained influencer or a saved element (genfire elements list).')
+      .description('Generate one or more images from a prompt. Use @<handle> for a trained influencer or a saved element (genfire elements list). GPT Image 2.6 (-m image.gpt_image_26_flare = fast, image.gpt_image_26_sunburst = precision) adds --output-format gif | svg, --reasoning-effort and --markup.')
   , { fileable: true }))
     .option('--influencer <id>', 'Explicit influencer id (alternative to @handle in the prompt)')
     .action(async (prompt: string, opts: CommonGenerateOptions & ImageFlags & { influencer?: string }) => {

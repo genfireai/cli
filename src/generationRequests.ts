@@ -227,6 +227,12 @@ export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const;
 // Ideogram 4.5 edits only (image.ideogram_v4_5). The API rejects it on every
 // other model and without a source image, so the CLI checks the value only.
 export const IMAGE_EDIT_PRECISIONS = ['regular', 'high'] as const;
+// GPT Image 2.6 (image.gpt_image_26_sunburst / _flare). Mirrored from
+// backend/src/lib/models/gptImage26.ts, which this package cannot import. The
+// CLI checks spelling only: the API clamps frame counts / durations and notes
+// what it adapted on the run (`notes`), so ranges are not refused here.
+export const IMAGE_OUTPUT_FORMATS = ['png', 'gif', 'svg'] as const;
+export const IMAGE_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
 const MOODBOARD_STRENGTHS = ['subtle', 'balanced', 'strong'] as const;
 const Z_IMAGE_CONTROL_MODES = ['none', 'canny', 'depth', 'pose'] as const;
 const Z_IMAGE_TILING_MODES = ['both', 'horizontal', 'vertical'] as const;
@@ -240,6 +246,13 @@ export interface ImageFlags extends GroundingFlags {
   quality?: string;
   resolution?: string;
   editPrecision?: string;
+  outputFormat?: string;
+  reasoningEffort?: string;
+  /** Alias of reasoningEffort (OpenAI's name); --reasoning-effort wins when both are given. */
+  complexity?: string;
+  frameCount?: string;
+  frameDurationMs?: string;
+  markup?: string;
   moodboard?: string;
   moodboardStrength?: string;
   imageStyle?: string[];
@@ -257,14 +270,20 @@ export function addImageRequestOptions(cmd: Command): Command {
     .option('-n, --count <n>', 'Number of images (1-4)', '1')
     .option(
       '-i, --image <urlOrPath>',
-      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / Seedream / Qwen / Nano Banana — Grok uses the first 3; Ideogram 4.5 = the source plus up to 4 references; Ideogram Vector = up to 5 references)',
+      'Source/reference image: URL, local path (auto-uploaded) or a completed run id. Repeat for a multi-image edit (up to 14; GPT Image 2 / 2.5 / 2.6 / Seedream / Qwen / Nano Banana — Grok uses the first 3; Ideogram 4.5 = the source plus up to 4 references; Ideogram Vector = up to 5 references)',
       collect,
       [] as string[]
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
-    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
+    .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2 / image.gpt_image_25_*; image.gpt_image_26_* prices its own ladder, low 4x / medium 20x / high 22x, so quote it with `genfire cost image`) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
     .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
+    .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')} (image.gpt_image_26_sunburst / image.gpt_image_26_flare only). gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector from a text prompt (no -i), plus a flat vectorizing fee. Both make one output whatever -n says`)
+    .option('--reasoning-effort <level>', `How much GPT Image 2.6 plans before drawing: ${IMAGE_REASONING_EFFORTS.join(', ')} (default high — best for dense text and layouts; lower is faster). No extra cost`)
+    .option('--complexity <level>', 'Alias of --reasoning-effort (OpenAI\'s name for it)')
+    .option('--frame-count <n>', 'GIF frames, 2-16 (default 9; with --output-format gif). At most 12 are sent and billed — the run\'s notes say so')
+    .option('--frame-duration-ms <ms>', 'Milliseconds per GIF frame, 20-2000 on a 10 ms grid (default 200; with --output-format gif)')
+    .option('--markup <urlOrPath>', 'GPT Image 2.6 edits (with -i): a transparent PNG of circles / arrows / notes drawn over the FIRST image to show what to change (URL, local path or run id). Left out beside --mask')
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
     .option('--moodboard-strength <level>', `How hard the moodboard steers: ${MOODBOARD_STRENGTHS.join(', ')}`)
     .option('--image-style <id[:scale]>', 'Trained image style (LoRA) from `genfire image-styles list`, optional :scale. Repeat for up to 3. Required by image.flux_lora; also read by the Z-Image Turbo models', collect, [] as string[])
@@ -297,6 +316,11 @@ export function validateImageFlags(opts: ImageFlags): void {
   }
   oneOf(opts.moodboardStrength, MOODBOARD_STRENGTHS, '--moodboard-strength');
   oneOf(opts.editPrecision, IMAGE_EDIT_PRECISIONS, '--edit-precision');
+  oneOf(opts.outputFormat, IMAGE_OUTPUT_FORMATS, '--output-format');
+  oneOf(opts.reasoningEffort, IMAGE_REASONING_EFFORTS, '--reasoning-effort');
+  oneOf(opts.complexity, IMAGE_REASONING_EFFORTS, '--complexity');
+  num(opts.frameCount, '--frame-count', { int: true });
+  num(opts.frameDurationMs, '--frame-duration-ms');
   oneOf(opts.controlMode, Z_IMAGE_CONTROL_MODES, '--control-mode');
   oneOf(opts.tilingMode, Z_IMAGE_TILING_MODES, '--tiling-mode');
   num(opts.strength, '--strength', { min: 0, max: 1 });
@@ -325,6 +349,13 @@ export async function buildImageRequest(opts: ImageFlags, resolveMedia: MediaRes
     quality: opts.quality,
     resolution: opts.resolution,
     edit_precision: opts.editPrecision?.trim().toLowerCase(),
+    // GPT Image 2.6. output_format + frame_count are price inputs, built here
+    // so `genfire cost image` quotes the same body `generate image` sends.
+    output_format: opts.outputFormat?.trim().toLowerCase(),
+    reasoning_effort: (opts.reasoningEffort ?? opts.complexity)?.trim().toLowerCase(),
+    frame_count: num(opts.frameCount, '--frame-count', { int: true }),
+    frame_duration_ms: num(opts.frameDurationMs, '--frame-duration-ms'),
+    markup_image_url: opts.markup ? await resolveMedia(opts.markup) : undefined,
     moodboard_id: opts.moodboard,
     moodboard_strength: opts.moodboardStrength?.trim().toLowerCase(),
     loras: parseLoraSpecs(opts.imageStyle, '--image-style', 3),
@@ -428,6 +459,9 @@ export interface VideoFlags extends GroundingFlags {
   firstFrame?: string;
   lastFrame?: string;
   sourceVideo?: string;
+  /** The --source-video window (Kling 4.0 / Flash edits): `video_trim_start` / `video_trim_duration`. */
+  sourceTrimStart?: string;
+  sourceTrimDuration?: string;
   refImage?: string[];
   refVideo?: string[];
   refVideoTrim?: string[];
@@ -471,6 +505,8 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
     .option('--last-frame <urlOrPath>', 'Last frame of a first/last-frame clip (needs --first-frame)')
     .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${KLING4_ALIAS} / video.kling_v4_flash it makes the run a video EDIT: the clip to change (cite it as @Video1; 3-30s, Flash 3-20s — a longer one is cut to fit), the prompt describes the change, --ref-video clips become @Video2… (up to 4), and with -d left off the output runs the clip's length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add. On ${H3_MAX_RELIGHT_ALIAS} it is the clip to relight (up to 15s; billed per second of it) — pass ONE lighting image with --ref-image and "" as the prompt`)
+    .option('--source-trim-start <seconds>', `Kling 4.0 / Flash edit (${KLING4_ALIAS} / video.kling_v4_flash with --source-video): second of the clip where the part to edit starts (default 0). Only the window is sent, and billed; other models ignore it`)
+    .option('--source-trim-duration <seconds>', 'Kling 4.0 / Flash edit: seconds of --source-video to edit, from --source-trim-start (default: to the clip\'s end, at most 30s / Flash 20s). With -d left off the output runs this length')
     .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1 / Kling 4.0, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
     .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 5 on video.kling_v4 (cite as @Video1…; each 3-30s, 30s TOTAL together with element videos — a longer pool is trimmed to fit), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
     .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5, where every window shares the 30s pool)')
@@ -705,6 +741,8 @@ export function validateVideoFlags(opts: VideoFlags): void {
     throw new CliError('--no-color-match is an H3 Max Insert setting — pass it with --insert-start / --insert-resume.', 'unsupported_color_match');
   }
   parseRefVideoTrims(opts.refVideoTrim, opts.refVideo?.length ?? 0);
+  num(opts.sourceTrimStart, '--source-trim-start');
+  num(opts.sourceTrimDuration, '--source-trim-duration');
   parseMultiPrompt(opts.multiPrompt, opts.model);
   parseLoraSpecs(opts.lora, '--lora', 3);
   for (const spec of opts.keyframe ?? []) {
@@ -910,6 +948,13 @@ export async function buildVideoRequest(
     first_frame_url: await one(opts.firstFrame),
     last_frame_url: await one(opts.lastFrame),
     source_video_url: await one(opts.sourceVideo),
+    // The source's window — the API folds it into the source's
+    // reference_video_trims entry on a Kling 4 edit (cut and billed with the
+    // other clips). Built here so `cost video` quotes the window `generate
+    // video` sends; without a source there is nothing to window, so nothing
+    // is sent (never refused).
+    video_trim_start: opts.sourceVideo ? num(opts.sourceTrimStart, '--source-trim-start') : undefined,
+    video_trim_duration: opts.sourceVideo ? num(opts.sourceTrimDuration, '--source-trim-duration') : undefined,
     reference_image_urls: referenceImageUrls,
     reference_video_urls: referenceVideoUrls,
     reference_video_trims: trims.length > 0 ? trims : undefined,

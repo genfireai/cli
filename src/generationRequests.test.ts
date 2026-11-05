@@ -165,6 +165,42 @@ test('Ideogram 4.5: --edit-precision reaches both bodies as edit_precision, iden
   await assert.rejects(buildImageRequest({ editPrecision: 'max' }, passthrough), /--edit-precision must be one of: regular, high/);
 });
 
+test('GPT Image 2.6: GIF / planning / markup flags reach both bodies identically', async () => {
+  const flags = [
+    '-m', 'image.gpt_image_26_flare', '-q', 'medium', '-i', 'https://cdn.example/src.png',
+    '--output-format', 'GIF', '--frame-count', '14', '--frame-duration-ms', '125',
+    '--complexity', 'Low', '--markup', 'https://cdn.example/marks.png'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'image', 'make the circled cup steam', ...flags, '--no-wait']), '/images/generations');
+  const est = bodyOf(await runCli(['cost', 'image', 'make the circled cup steam', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'make the circled cup steam');
+  // output_format + frame_count are price inputs: a quote is only spendable when they match.
+  assert.deepEqual(genRest, est, 'a quote stays spendable');
+  assert.equal(gen.output_format, 'gif', 'normalised to lowercase');
+  // Out-of-range frames / off-grid durations are the API's to clamp (and note), not the CLI's to refuse.
+  assert.equal(gen.frame_count, 14);
+  assert.equal(gen.frame_duration_ms, 125);
+  assert.equal(gen.reasoning_effort, 'low', '--complexity is an alias of --reasoning-effort');
+  assert.equal('complexity' in gen, false, 'sent under the one canonical field');
+  assert.equal(gen.markup_image_url, 'https://cdn.example/marks.png');
+
+  // --reasoning-effort wins over its alias; unset 2.6 flags stay off the wire.
+  const both = await buildImageRequest({ reasoningEffort: 'high', complexity: 'low' }, passthrough);
+  assert.equal(both.reasoning_effort, 'high');
+  const plain = await buildImageRequest({ model: 'image.gpt_image_26_sunburst' }, passthrough);
+  for (const key of ['output_format', 'reasoning_effort', 'frame_count', 'frame_duration_ms', 'markup_image_url']) {
+    assert.equal(key in plain, false, `${key} is not sent unless asked for`);
+  }
+  // A local markup path / run id resolves like every other media input.
+  const local = await buildImageRequest({ image: ['src.png'], markup: 'marks.png' }, passthrough);
+  assert.equal(local.markup_image_url, 'https://cdn.example/marks.png');
+
+  await assert.rejects(buildImageRequest({ outputFormat: 'webp' }, passthrough), /--output-format must be one of: png, gif, svg/);
+  await assert.rejects(buildImageRequest({ reasoningEffort: 'max' }, passthrough), /--reasoning-effort must be one of: low, medium, high/);
+  await assert.rejects(buildImageRequest({ frameCount: '9.5' }, passthrough), /--frame-count must be an integer/);
+});
+
 test('Ideogram Vector: image.ideogram_vector rides the image body, and generate and cost agree', async () => {
   const flags = ['-m', 'image.ideogram_vector', '-q', 'high', '-a', '4:1', '-i', 'https://cdn.example/ref.png'];
   const gen = bodyOf(await runCli(['generate', 'image', 'a fox mark', ...flags, '--no-wait']), '/images/generations');
@@ -315,6 +351,32 @@ test('H3 Max Recast: clip + cast ride the existing flags, identically on cost an
   assert.equal(est.resolution, '768p');
   // No window, no duration default: nothing Insert-shaped rides along.
   for (const key of ['insert_start_time', 'insert_resume_time', 'color_match', 'duration']) assert.equal(key in est, false);
+});
+
+test('Kling 4 edit: --source-trim-start / --source-trim-duration window the source identically on cost and generate', async () => {
+  const flags = [
+    '-m', 'video.kling_v4_flash', '--source-video', 'https://cdn.example/src.mp4',
+    '--source-trim-start', '2.5', '--source-trim-duration', '6'
+  ];
+  const gen = bodyOf(await runCli(['generate', 'video', 'make it snow', ...flags, '--no-wait']), '/videos/generations');
+  const est = bodyOf(await runCli(['cost', 'video', 'make it snow', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'make it snow');
+  assert.deepEqual(genRest, est, 'the window is priced as it is sent');
+  assert.equal(est.video_trim_start, 2.5);
+  assert.equal(est.video_trim_duration, 6);
+  // No -d: the output follows the (windowed) source, so no duration rides along.
+  assert.equal('duration' in est, false);
+
+  // Without a source there is nothing to window: not sent, never refused.
+  const noSource = await buildVideoRequest({ model: 'video.kling_v4', sourceTrimStart: '1', sourceTrimDuration: '4' }, passthrough);
+  assert.equal('video_trim_start' in noSource, false);
+  assert.equal('video_trim_duration' in noSource, false);
+  // A start alone rides alone (the API runs it to the clip's end).
+  const startOnly = await buildVideoRequest({ model: 'video.kling_v4', sourceVideo: 'src.mp4', sourceTrimStart: '3' }, passthrough);
+  assert.equal(startOnly.video_trim_start, 3);
+  assert.equal('video_trim_duration' in startOnly, false);
+  assert.throws(() => validateVideoFlags({ sourceVideo: 'src.mp4', sourceTrimStart: 'soon' }), /--source-trim-start must be a number/);
 });
 
 test('H3 Max Recast flag validation fails before anything uploads — and only on Recast', () => {
