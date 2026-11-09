@@ -47,7 +47,7 @@ test('blade is hidden from help but callable', () => {
   const cmd = program.commands.find((c) => c.name() === 'blade')!;
   assert.ok(cmd);
   assert.equal((cmd as any)._hidden, true);
-  assert.deepEqual(cmd.commands.map((c) => c.name()), ['presets', 'start', 'status', 'quote', 'finish']);
+  assert.deepEqual(cmd.commands.map((c) => c.name()), ['presets', 'start', 'status', 'quote', 'checkpoint', 'finish']);
 });
 
 test('presets lists, or reads one by slug', async () => {

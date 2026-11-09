@@ -190,14 +190,33 @@ export function registerBladeCommand(program: Command): void {
 
   blade
     .command('quote <sessionId>')
-    .description("Record the plan's credit estimate and the cap the user agreed to")
+    .description("Record the plan's credit estimate and the run's cap")
     .option('--quoted <credits>', "The plan's estimated total")
-    .option('--cap <credits>', 'The most to spend (defaults to the quote)')
+    .option('--cap <credits>', 'The most to spend: the plan plus retries, within your budget (defaults to the quote)')
     .action(async (sessionId: string, opts: { quoted?: string; cap?: string }) => {
       const s = await publicApiRequest<BladeSession>('POST', sessionPath(sessionId, '/quote'), {
         body: {
           ...(opts.quoted !== undefined ? { quoted_credits: Number(opts.quoted) } : {}),
           ...(opts.cap !== undefined ? { cap_credits: Number(opts.cap) } : {}),
+        },
+      });
+      printResult(s, () => printSession(s));
+    });
+
+  blade
+    .command('checkpoint <sessionId>')
+    .description('Record a resume point: the stage reached, the saved gf state archive and every run started')
+    .requiredOption('--stage <stage>', 'The stage reached: analysed, planned, capped, generating, generated, rendered')
+    .option('--state-url <url>', 'The url save_paths returned for ~/state/blade_v<N>.tar.gz')
+    .option('-r, --run-ids <runId>', 'A run started so far (repeatable, or comma-separated)', collect, [] as string[])
+    .option('--note <text>', 'One line: what comes next')
+    .action(async (sessionId: string, opts: { stage: string; stateUrl?: string; runIds: string[]; note?: string }) => {
+      const s = await publicApiRequest<BladeSession>('POST', sessionPath(sessionId, '/checkpoint'), {
+        body: {
+          stage: opts.stage,
+          ...(opts.stateUrl ? { state_url: opts.stateUrl } : {}),
+          ...(opts.runIds.length ? { run_ids: opts.runIds } : {}),
+          ...(opts.note ? { note: opts.note } : {}),
         },
       });
       printResult(s, () => printSession(s));
@@ -211,8 +230,17 @@ export function registerBladeCommand(program: Command): void {
     .option('--timeline <timelineId>', 'An editable timeline that already exists (tl_…)')
     .option('--timeline-file <path>', 'Or a timeline manifest (the timeline.json `gf assemble` writes): created in the project')
     .option('-r, --run-ids <runId>', 'A run this edit started (repeatable, or comma-separated)', collect, [] as string[])
-    .action(async (sessionId: string, opts: { video?: string; run?: string; timeline?: string; timelineFile?: string; runIds: string[] }) => {
+    .option('--qa-file <path>', 'The gf qa report (~/qa/report.json) for the saved final: required for a sandbox-rendered final')
+    .action(async (sessionId: string, opts: { video?: string; run?: string; timeline?: string; timelineFile?: string; runIds: string[]; qaFile?: string }) => {
       let timeline: unknown;
+      let qaReport: unknown;
+      if (opts.qaFile) {
+        try {
+          qaReport = JSON.parse(readFileSync(opts.qaFile, 'utf8'));
+        } catch (e) {
+          throw new Error(`Could not read the QA report ${opts.qaFile}: ${(e as Error).message}`);
+        }
+      }
       if (opts.timelineFile) {
         try {
           timeline = JSON.parse(readFileSync(opts.timelineFile, 'utf8'));
@@ -227,6 +255,7 @@ export function registerBladeCommand(program: Command): void {
           ...(opts.timeline ? { timeline_id: opts.timeline } : {}),
           ...(timeline && typeof timeline === 'object' ? { timeline } : {}),
           ...(opts.runIds.length ? { run_ids: opts.runIds } : {}),
+          ...(qaReport && typeof qaReport === 'object' ? { qa_report: qaReport } : {}),
         },
       });
       printResult(s, () => {
