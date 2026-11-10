@@ -223,7 +223,8 @@ async function buildGrounding(opts: GroundingFlags, resolveMedia: MediaResolver)
 // ─── Image ───────────────────────────────────────────────────────────────────
 
 export const IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto'] as const;
-export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const;
+// 1.5K / 3K are image.seedream_v55's own tiers (the API refuses them elsewhere).
+export const IMAGE_RESOLUTIONS = ['1K', '1.5K', '2K', '3K', '4K'] as const;
 // Ideogram 4.5 edits only (image.ideogram_v4_5). The API rejects it on every
 // other model and without a source image, so the CLI checks the value only.
 export const IMAGE_EDIT_PRECISIONS = ['regular', 'high'] as const;
@@ -231,8 +232,11 @@ export const IMAGE_EDIT_PRECISIONS = ['regular', 'high'] as const;
 // backend/src/lib/models/gptImage26.ts, which this package cannot import. The
 // CLI checks spelling only: the API clamps frame counts / durations and notes
 // what it adapted on the run (`notes`), so ranges are not refused here.
-export const IMAGE_OUTPUT_FORMATS = ['png', 'gif', 'svg'] as const;
+// jpeg is image.seedream_v55's (backend/src/lib/models/seedream55.ts).
+export const IMAGE_OUTPUT_FORMATS = ['png', 'gif', 'svg', 'jpeg'] as const;
 export const IMAGE_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
+// Seedream 5.5 (image.seedream_v55) only; mirrored from lib/models/seedream55.
+export const IMAGE_BACKGROUNDS = ['auto', 'transparent', 'opaque'] as const;
 const MOODBOARD_STRENGTHS = ['subtle', 'balanced', 'strong'] as const;
 const Z_IMAGE_CONTROL_MODES = ['none', 'canny', 'depth', 'pose'] as const;
 const Z_IMAGE_TILING_MODES = ['both', 'horizontal', 'vertical'] as const;
@@ -253,6 +257,7 @@ export interface ImageFlags extends GroundingFlags {
   frameCount?: string;
   frameDurationMs?: string;
   markup?: string;
+  background?: string;
   moodboard?: string;
   moodboardStrength?: string;
   imageStyle?: string[];
@@ -276,14 +281,15 @@ export function addImageRequestOptions(cmd: Command): Command {
     )
     .option('--mask <urlOrPath>', 'Inpaint mask (white = repaint, black = keep), same size as the source. Needs -i. Models with capabilities.masked_inpaint only')
     .option('-q, --quality <level>', 'Quality tier: low, medium, high, auto (image.gpt_image_2 / image.gpt_image_25_*; image.gpt_image_26_* prices its own ladder, low 4x / medium 20x / high 22x, so quote it with `genfire cost image`) — image.grok_imagine_2 takes low or medium; image.ideogram_v4_5 and image.ideogram_vector take low, medium or high (default medium)')
-    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x)')
+    .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x; image.seedream_v55 = 1K, 1.5K, 2K or 3K, default 2K, 4K runs at 3K, priced per tier)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
-    .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')} (image.gpt_image_26_sunburst / image.gpt_image_26_flare only). gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector (with -i the edit renders, then is vectorized), plus a vectorizing fee. Both make one output whatever -n says`)
+    .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')}. image.seedream_v55: png or jpeg, same price. image.gpt_image_26_sunburst / image.gpt_image_26_flare: png, gif or svg — gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector (with -i the edit renders, then is vectorized), plus a vectorizing fee. Both make one output whatever -n says`)
     .option('--reasoning-effort <level>', `How much GPT Image 2.6 plans before drawing: ${IMAGE_REASONING_EFFORTS.join(', ')} (default high — best for dense text and layouts; lower is faster). No extra cost`)
     .option('--complexity <level>', 'Alias of --reasoning-effort (OpenAI\'s name for it)')
     .option('--frame-count <n>', 'GIF frames, 2-16 (default 9; with --output-format gif). At most 12 are sent and billed — the run\'s notes say so')
     .option('--frame-duration-ms <ms>', 'Milliseconds per GIF frame, 20-2000 on a 10 ms grid (default 200; with --output-format gif)')
     .option('--markup <urlOrPath>', 'GPT Image 2.6 edits (with -i): a transparent PNG of circles / arrows / notes drawn over the FIRST image to show what to change (URL, local path or run id). Left out beside --mask')
+    .option('--background <mode>', `Background: ${IMAGE_BACKGROUNDS.join(', ')} (image.seedream_v55 only; default auto). transparent = a PNG with an alpha channel (logos, stickers, cut-outs). Same price`)
     .option('--moodboard <moodboardId>', 'Style the image after one of your moodboards (see: genfire moodboards list)')
     .option('--moodboard-strength <level>', `How hard the moodboard steers: ${MOODBOARD_STRENGTHS.join(', ')}`)
     .option('--image-style <id[:scale]>', 'Trained image style (LoRA) from `genfire image-styles list`, optional :scale. Repeat for up to 3. Required by image.flux_lora; also read by the Z-Image Turbo models', collect, [] as string[])
@@ -317,6 +323,7 @@ export function validateImageFlags(opts: ImageFlags): void {
   oneOf(opts.moodboardStrength, MOODBOARD_STRENGTHS, '--moodboard-strength');
   oneOf(opts.editPrecision, IMAGE_EDIT_PRECISIONS, '--edit-precision');
   oneOf(opts.outputFormat, IMAGE_OUTPUT_FORMATS, '--output-format');
+  oneOf(opts.background, IMAGE_BACKGROUNDS, '--background');
   oneOf(opts.reasoningEffort, IMAGE_REASONING_EFFORTS, '--reasoning-effort');
   oneOf(opts.complexity, IMAGE_REASONING_EFFORTS, '--complexity');
   num(opts.frameCount, '--frame-count', { int: true });
@@ -356,6 +363,8 @@ export async function buildImageRequest(opts: ImageFlags, resolveMedia: MediaRes
     frame_count: num(opts.frameCount, '--frame-count', { int: true }),
     frame_duration_ms: num(opts.frameDurationMs, '--frame-duration-ms'),
     markup_image_url: opts.markup ? await resolveMedia(opts.markup) : undefined,
+    // Seedream 5.5 (not a price input).
+    background: opts.background?.trim().toLowerCase(),
     moodboard_id: opts.moodboard,
     moodboard_strength: opts.moodboardStrength?.trim().toLowerCase(),
     loras: parseLoraSpecs(opts.imageStyle, '--image-style', 3),

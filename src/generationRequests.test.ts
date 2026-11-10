@@ -201,6 +201,28 @@ test('GPT Image 2.6: GIF / planning / markup flags reach both bodies identically
   await assert.rejects(buildImageRequest({ frameCount: '9.5' }, passthrough), /--frame-count must be an integer/);
 });
 
+test('Seedream 5.5: --background, jpeg and the 1.5K / 3K tiers reach both bodies identically', async () => {
+  const flags = [
+    '-m', 'image.seedream_v55', '-r', '1.5K', '--background', 'Transparent', '--output-format', 'JPEG',
+    '-i', 'https://cdn.example/a.png', '-i', 'https://cdn.example/b.png',
+  ];
+  const gen = bodyOf(await runCli(['generate', 'image', 'a sticker of a fox', ...flags, '--no-wait']), '/images/generations');
+  const est = bodyOf(await runCli(['cost', 'image', 'a sticker of a fox', ...flags]), '/models/estimate-cost');
+  const { prompt, ...genRest } = gen;
+  assert.equal(prompt, 'a sticker of a fox');
+  assert.deepEqual(genRest, est, 'a quote stays spendable');
+  assert.equal(gen.resolution, '1.5K');
+  assert.equal(gen.background, 'transparent', 'normalised to lowercase');
+  // jpeg + transparent is the API's to adapt (it saves png and notes it), not the CLI's to refuse.
+  assert.equal(gen.output_format, 'jpeg');
+  assert.deepEqual(gen.image_urls, ['https://cdn.example/a.png', 'https://cdn.example/b.png']);
+  const threeK = await buildImageRequest({ model: 'image.seedream_v55', resolution: '3K' }, passthrough);
+  assert.equal(threeK.resolution, '3K');
+  const plain = await buildImageRequest({ model: 'image.seedream_v55' }, passthrough);
+  assert.equal('background' in plain, false, 'background is not sent unless asked for');
+  await assert.rejects(buildImageRequest({ background: 'checkerboard' }, passthrough), /--background must be one of: auto, transparent, opaque/);
+});
+
 test('Ideogram Vector: image.ideogram_vector rides the image body, and generate and cost agree', async () => {
   const flags = ['-m', 'image.ideogram_vector', '-q', 'high', '-a', '4:1', '-i', 'https://cdn.example/ref.png'];
   const gen = bodyOf(await runCli(['generate', 'image', 'a fox mark', ...flags, '--no-wait']), '/images/generations');

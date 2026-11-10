@@ -2,6 +2,7 @@
 
 import { registerRuntimeCommands } from './commands/runtime.js';
 import { registerBladeCommand } from './commands/blade.js';
+import { registerVideoLayersCommand } from './commands/videoLayers.js';
 import { Command } from 'commander';
 import { formatError } from './errors.js';
 import { setGlobalFlags } from './output.js';
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
   registerMediaCommands(program);
   registerRuntimeCommands(program);
   registerBladeCommand(program);
+  registerVideoLayersCommand(program);
   registerWorkflowCommands(program);
   registerTimelineCommands(program);
   registerRunLifecycleCommands(program); // runs cancel/delete, timeline export, export (after runs + timeline)
