@@ -739,22 +739,28 @@ export function registerGenerateCommands(program: Command): void {
   commonOptions(
     generate
       .command('upscale-video')
-      .description('Upscale a video — Topaz 2×/4× (default) or Flux 1.5×–3×')
+      .description('Upscale a video — Topaz 2×/4× (default), Flux 1.5×–3×, or LTX 2.5 to 1080p/4K/8K')
   )
     .requiredOption('--video <urlOrPath>', 'Source video URL or local path (auto-uploaded)')
-    .option('-s, --scale <factor>', 'Scale factor: 2 or 4 (Topaz), 1.5–3 (Flux)', '2')
-    .option('-e, --engine <engine>', 'Engine: topaz or flux', 'topaz')
+    .option('-s, --scale <factor>', 'Scale factor: 2 or 4 (Topaz), 1.5–3 (Flux); ignored by LTX', '2')
+    .option('-e, --engine <engine>', 'Engine: topaz, flux or ltx', 'topaz')
     .option('--mode <mode>', 'Flux only: precise or creative', 'creative')
     .option('--prompt <text>', 'Flux only: guides the creative pass')
-    .action(async (opts: CommonGenerateOptions & { video: string; scale: string; engine: string; mode: string; prompt?: string }) => {
+    .option('-r, --resolution <tier>', 'LTX only: 1080p, 4k or 8k', '4k')
+    .action(async (opts: CommonGenerateOptions & { video: string; scale: string; engine: string; mode: string; prompt?: string; resolution: string }) => {
       const engine = String(opts.engine || 'topaz').toLowerCase();
-      if (engine !== 'topaz' && engine !== 'flux') {
-        throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz or flux.`, 'invalid_engine');
+      if (engine !== 'topaz' && engine !== 'flux' && engine !== 'ltx') {
+        throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz, flux or ltx.`, 'invalid_engine');
       }
       const scale = Number(opts.scale);
-      // Each engine validates only its own range — Flux takes a float, Topaz
-      // the integer pair the command has always accepted.
-      if (engine === 'flux') {
+      const resolution = String(opts.resolution || '4k').toLowerCase();
+      // Each engine validates only its own knob — Flux takes a float, Topaz
+      // the integer pair the command has always accepted, LTX a target tier.
+      if (engine === 'ltx') {
+        if (resolution !== '1080p' && resolution !== '4k' && resolution !== '8k') {
+          throw new CliError(`Invalid --resolution: ${opts.resolution}. Use 1080p, 4k or 8k.`, 'invalid_resolution');
+        }
+      } else if (engine === 'flux') {
         if (!Number.isFinite(scale) || scale < 1.5 || scale > 3) {
           throw new CliError(`Invalid --scale: ${opts.scale}. Flux accepts 1.5–3.`, 'invalid_scale_factor');
         }
@@ -769,7 +775,9 @@ export function registerGenerateCommands(program: Command): void {
       const run = await client.upscaleVideo(
         {
           source_video_url: sourceVideoUrl,
-          scale_factor: scale,
+          ...(engine === 'ltx'
+            ? { model: 'video_upscale.ltx_2_5', resolution }
+            : { scale_factor: scale }),
           ...(engine === 'flux'
             ? {
                 model: 'video_upscale.flux_video_upscale' as const,

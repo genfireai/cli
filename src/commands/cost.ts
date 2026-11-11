@@ -179,21 +179,22 @@ export function registerCostCommand(program: Command): void {
 
   cost
     .command('upscale-video')
-    .description('Estimate the credit cost of a video upscale (Topaz or Flux)')
-    .option('-s, --scale <factor>', 'Scale factor: 2 or 4 (Topaz), 1.5–3 (Flux)', '2')
-    .option('-e, --engine <engine>', 'Engine: topaz or flux', 'topaz')
+    .description('Estimate the credit cost of a video upscale (Topaz, Flux or LTX 2.5)')
+    .option('-s, --scale <factor>', 'Scale factor: 2 or 4 (Topaz), 1.5–3 (Flux); ignored by LTX', '2')
+    .option('-e, --engine <engine>', 'Engine: topaz, flux or ltx', 'topaz')
     .option('--mode <mode>', 'Flux only: precise or creative', 'creative')
+    .option('-r, --resolution <tier>', 'LTX only: 1080p, 4k or 8k', '4k')
     .option('-d, --duration <seconds>', 'Source clip length in seconds')
     .option('--width <px>', 'Source width in pixels')
     .option('--height <px>', 'Source height in pixels')
-    .action(async (opts: { scale: string; engine: string; mode: string; duration?: string; width?: string; height?: string }) => {
+    .action(async (opts: { scale: string; engine: string; mode: string; resolution: string; duration?: string; width?: string; height?: string }) => {
       const engine = String(opts.engine || 'topaz').toLowerCase();
-      if (engine !== 'topaz' && engine !== 'flux') {
-        throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz or flux.`, 'invalid_engine');
+      if (engine !== 'topaz' && engine !== 'flux' && engine !== 'ltx') {
+        throw new CliError(`Invalid --engine: ${opts.engine}. Use topaz, flux or ltx.`, 'invalid_engine');
       }
       await runEstimate({
-        model: engine === 'flux' ? 'video_upscale.flux_video_upscale' : 'video_upscale.topaz',
-        scale_factor: Number(opts.scale),
+        model: engine === 'flux' ? 'video_upscale.flux_video_upscale' : engine === 'ltx' ? 'video_upscale.ltx_2_5' : 'video_upscale.topaz',
+        ...(engine === 'ltx' ? { resolution: String(opts.resolution || '4k').toLowerCase() } : { scale_factor: Number(opts.scale) }),
         ...(engine === 'flux' ? { mode: opts.mode } : {}),
         duration: opts.duration ? Number(opts.duration) : undefined,
         source_width: opts.width ? Number(opts.width) : undefined,
