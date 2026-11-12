@@ -31,7 +31,11 @@ import {
   draftFinalPath,
   recoverTrailingPrompt,
   VIDEO_VARIADIC_FLAGS,
-  type SpeechExtraFlags
+  type SpeechExtraFlags,
+  buildMusicExtraFields,
+  MUSIC_CONDITION_STRENGTHS,
+  MUSIC_GENERATION_MODES,
+  type MusicExtraFlags
 } from '../generationRequests.js';
 
 interface CommonGenerateOptions {
@@ -462,7 +466,7 @@ export function registerGenerateCommands(program: Command): void {
     .option('--instrumental', 'Force an instrumental (no vocals; ElevenLabs prompt mode only)')
     .option('--image-url <url>', 'Image URL used as inspiration (Lyria 3.5 / 3 Pro only)')
     .option('--negative-prompt <text>', 'Deprecated — no music model supports negative prompting; ignored')
-    .option('--lyrics <text>', 'Lyrics to sing — REQUIRED for music.minimax_music_3. Each structure tag ([verse], [chorus], ...) on its own line')
+    .option('--lyrics <text>', 'Lyrics to sing — REQUIRED for music.minimax_music_3; ElevenLabs sings them as written (prompt mode, up to 4000 chars). Each structure tag ([verse], [chorus], ...) on its own line')
     .option('--lyrics-file <path>', 'Read the lyrics from a text file instead of --lyrics')
     .option('--steps <n>', 'Flow-matching steps per 8s chunk, 1-100 (MiniMax Music 3 only)')
     .option('--guidance <n>', 'Classifier-free guidance scale, 0-20 (MiniMax Music 3 only)')
@@ -471,7 +475,18 @@ export function registerGenerateCommands(program: Command): void {
     .option('--details', 'Return detailed metadata (composition plan + song metadata) with the track (ElevenLabs; priced — see `genfire cost music --details`)')
     .option('--timestamps', 'Include word timestamps (implies --details)')
     .option('--store-for-inpainting', 'Keep the song editable for later inpainting (ElevenLabs, with --details)')
-    .action(async (prompt: string | undefined, opts: CommonGenerateOptions & {
+    .option('--vocal <id>', 'Sing with a VOCAL or STYLE (ElevenLabs finetune id from `genfire vocals list`); with no -m the song runs on the vocal\'s base model')
+    .option('--vocal-strength <n>', 'With --vocal: how strongly to apply it, 0-2 (default 1)')
+    .option('--generation-mode <mode>', `ElevenLabs: ${MUSIC_GENERATION_MODES.join(' | ')} (default track)`)
+    .option('--phonetic-names', 'ElevenLabs: sing proper names phonetically')
+    .option('--waveform', 'ElevenLabs, with --details: also return output.waveform')
+    .option('--reference-audio <urlOrPath>', 'ElevenLabs audio reference that steers genre and groove (URL, local file or run id; up to 30s used, billed on top — price it with `genfire cost music --reference-audio`)')
+    .option('--reference-start-ms <ms>', 'Where the 30s reference window starts, in ms')
+    .option('--condition-strength <level>', `How closely to follow the reference: ${MUSIC_CONDITION_STRENGTHS.join(' | ')}`)
+    .option('--add-sfx', 'With --video: add sound effects cued to the footage')
+    .option('--separate-tracks', 'With --video --add-sfx: deliver music and SFX as separate files (output.sfx_url)')
+    .option('--use-audio-as-reference', 'With --video: follow the video\'s own soundtrack as a reference')
+    .action(async (prompt: string | undefined, opts: CommonGenerateOptions & MusicExtraFlags & {
       model?: string; duration?: string; planFile?: string; seed?: string; flexSections?: boolean;
       format?: string; instrumental?: boolean; imageUrl?: string; negativePrompt?: string;
       lyrics?: string; lyricsFile?: string; steps?: string; guidance?: string;
@@ -501,8 +516,11 @@ export function registerGenerateCommands(program: Command): void {
       if (opts.video && compositionPlan) {
         throw new CliError('--video (video-to-music) and --plan-file cannot be used together.', 'invalid_arguments');
       }
+      // Validate the 2026-11 flags locally BEFORE any upload.
+      const extras = buildMusicExtraFields(opts, { hasVideo: Boolean(opts.video) });
       const client = await createClient();
       const videoUrl = opts.video ? (await resolveMediaInput(client, opts.video)).url : undefined;
+      const referenceAudioUrl = opts.referenceAudio ? (await resolveMediaInput(client, opts.referenceAudio)).url : undefined;
       const run = await client.createMusic(
         {
           prompt,
@@ -524,6 +542,8 @@ export function registerGenerateCommands(program: Command): void {
           lyrics: lyrics?.trim() || undefined,
           num_inference_steps: opts.steps ? Number(opts.steps) : undefined,
           guidance_scale: opts.guidance ? Number(opts.guidance) : undefined,
+          ...extras,
+          ...(referenceAudioUrl ? { reference_audio_url: referenceAudioUrl } : {}),
           ...scopeFields(opts)
         } as any,
         { idempotencyKey: randomUUID() }
@@ -537,19 +557,23 @@ export function registerGenerateCommands(program: Command): void {
       .command('sfx <prompt>')
       .description('Generate a sound effect from a prompt')
   , { fileable: true })
-    .option('-m, --model <model>', 'SFX model alias')
+    .option('-m, --model <model>', 'SFX model: sfx.elevenlabs_v3 (default, Text to Sound v3) | sfx.elevenlabs_v1 (Text to Sound v2, removed 2027-03-01)')
+    .option('--sfx-model <model>', 'Same as -m')
     .option('-d, --duration <seconds>', 'Duration in seconds')
     .option('--format <format>', 'Output format')
     .option('--prompt-influence <weight>', 'Prompt influence (0..1)')
     .option('--loop', 'Loop the generated sound')
     .action(async (prompt: string, opts: CommonGenerateOptions & {
-      model?: string; duration?: string; format?: string; promptInfluence?: string; loop?: boolean;
+      model?: string; sfxModel?: string; duration?: string; format?: string; promptInfluence?: string; loop?: boolean;
     }) => {
+      if (opts.model && opts.sfxModel && opts.model !== opts.sfxModel) {
+        throw new CliError('-m and --sfx-model name different models; pass one.', 'invalid_arguments');
+      }
       const client = await createClient();
       const run = await client.createSoundEffect(
         {
           prompt,
-          model: opts.model,
+          model: opts.model || opts.sfxModel,
           duration_seconds: opts.duration ? Number(opts.duration) : undefined,
           output_format: opts.format,
           prompt_influence: opts.promptInfluence ? Number(opts.promptInfluence) : undefined,

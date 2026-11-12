@@ -1094,3 +1094,84 @@ export async function buildSpeechExtras(text: string | undefined, opts: SpeechEx
     voice_settings: voiceSettings
   });
 }
+
+// ─── Music (ElevenLabs 2026-11 extras) ──────────────────────────────────────
+
+export const MUSIC_GENERATION_MODES = ['track', 'loop', 'ambience'] as const;
+export const MUSIC_CONDITION_STRENGTHS = ['low', 'medium', 'high', 'xhigh'] as const;
+
+export interface MusicExtraFlags {
+  vocal?: string;
+  vocalStrength?: string;
+  generationMode?: string;
+  phoneticNames?: boolean;
+  waveform?: boolean;
+  referenceAudio?: string;
+  referenceStartMs?: string;
+  conditionStrength?: string;
+  addSfx?: boolean;
+  separateTracks?: boolean;
+  useAudioAsReference?: boolean;
+}
+
+/**
+ * The 2026-11 ElevenLabs music fields of `genfire generate music`, as wire
+ * fields. Pure (the reference audio is resolved by the caller, since it may
+ * upload). Typos fail here, before any upload; values the API adapts (a
+ * strength above 2, a long lyric sheet) are left for the API to adapt.
+ */
+export function buildMusicExtraFields(opts: MusicExtraFlags, context: { hasVideo: boolean }): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (opts.vocal !== undefined) {
+    const vocal = opts.vocal.trim();
+    if (!vocal) throw new CliError('--vocal needs an id (see `genfire vocals list`).', 'invalid_vocal');
+    out.finetune_id = vocal;
+  }
+  if (opts.vocalStrength !== undefined) {
+    if (!out.finetune_id) throw new CliError('--vocal-strength needs --vocal.', 'invalid_arguments');
+    const strength = Number(opts.vocalStrength);
+    if (!Number.isFinite(strength)) throw new CliError(`Invalid --vocal-strength: ${opts.vocalStrength}. Use a number 0-2.`, 'invalid_vocal_strength');
+    out.finetune_strength = strength;
+  }
+  if (opts.generationMode !== undefined) {
+    const mode = opts.generationMode.trim().toLowerCase();
+    if (!(MUSIC_GENERATION_MODES as readonly string[]).includes(mode)) {
+      throw new CliError(`Invalid --generation-mode: ${opts.generationMode}. Use ${MUSIC_GENERATION_MODES.join(', ')}.`, 'invalid_generation_mode');
+    }
+    out.generation_mode = mode;
+  }
+  if (opts.phoneticNames) out.use_phonetic_names = true;
+  if (opts.waveform) out.with_waveform = true;
+  if (opts.referenceAudio !== undefined && context.hasVideo) {
+    throw new CliError('--reference-audio is for prompt / plan mode; with --video use --use-audio-as-reference.', 'invalid_arguments');
+  }
+  if (opts.referenceStartMs !== undefined) {
+    if (!opts.referenceAudio) throw new CliError('--reference-start-ms needs --reference-audio.', 'invalid_arguments');
+    const startMs = Number(opts.referenceStartMs);
+    if (!Number.isInteger(startMs) || startMs < 0) {
+      throw new CliError(`Invalid --reference-start-ms: ${opts.referenceStartMs}. Use a whole number of ms, 0 or more.`, 'invalid_reference_start');
+    }
+    out.reference_start_ms = startMs;
+  }
+  if (opts.conditionStrength !== undefined) {
+    if (!opts.referenceAudio) throw new CliError('--condition-strength needs --reference-audio.', 'invalid_arguments');
+    const level = opts.conditionStrength.trim().toLowerCase();
+    if (!(MUSIC_CONDITION_STRENGTHS as readonly string[]).includes(level)) {
+      throw new CliError(`Invalid --condition-strength: ${opts.conditionStrength}. Use ${MUSIC_CONDITION_STRENGTHS.join(', ')}.`, 'invalid_condition_strength');
+    }
+    out.condition_strength = level;
+  }
+  const videoOnly: Array<[keyof MusicExtraFlags, string, string]> = [
+    ['addSfx', '--add-sfx', 'add_sfx'],
+    ['separateTracks', '--separate-tracks', 'separate_tracks'],
+    ['useAudioAsReference', '--use-audio-as-reference', 'use_audio_as_reference'],
+  ];
+  for (const [flag, name, field] of videoOnly) {
+    if (!opts[flag]) continue;
+    if (!context.hasVideo) throw new CliError(`${name} needs --video (video-to-music).`, 'invalid_arguments');
+    out[field] = true;
+  }
+  // --separate-tracks without --add-sfx is sent as-is: the API ignores it and
+  // says so in output.notes (adapt, don't refuse).
+  return out;
+}

@@ -9,6 +9,8 @@ import {
   resolveMediaInput,
   waitForRun
 } from '../../runHelpers.js';
+import { buildMusicExtraFields } from '../../generationRequests.js';
+import { publicApiRequest } from '../../client.js';
 
 function fmtTable(rows: string[][], headers: string[]): string {
   if (rows.length === 0) return '(no rows)';
@@ -330,7 +332,8 @@ async function followJob(jobId: string, fallbackName: string, output: string | u
 registerSlash({
   name: 'generate',
   summary: 'Generate media. Usage: /generate <image|video|speech|music|sfx> "<prompt>" [flags]',
-  usage: '/generate <kind> "<prompt>" [-m model] [-i image] [-o path]',
+  usage:
+    '/generate <kind> "<prompt>" [-m model] [-i image] [-o path]  ·  music: [--lyrics "<text>"] [--instrumental] [--vocal <id>] [--vocal-strength 0-2] [--generation-mode track|loop|ambience] [--phonetic-names] [--reference-audio <file|url>] [--reference-start-ms <ms>] [--condition-strength low|medium|high|xhigh] [--video <file|url> --add-sfx --separate-tracks --use-audio-as-reference]',
   requiresAuth: true,
   execute: async ({ args, client, log }) => {
     if (!client) return;
@@ -356,10 +359,41 @@ registerSlash({
     const count = flag('-n') || flag('--count');
     const voiceId = flag('--voice-id');
     const negativePrompt = flag('--negative-prompt');
+    const has = (name: string): boolean => args.includes(name);
+
+    // Music extras (ElevenLabs vocals, reference audio, video-to-music) use the
+    // same builder as `genfire generate music`, so typos fail here, before any
+    // upload, with the same messages.
+    const videoPath = kind === 'music' ? flag('--video') : undefined;
+    const referenceAudioPath = kind === 'music' ? flag('--reference-audio') : undefined;
+    const musicExtras =
+      kind === 'music'
+        ? buildMusicExtraFields(
+            {
+              vocal: flag('--vocal'),
+              vocalStrength: flag('--vocal-strength'),
+              generationMode: flag('--generation-mode'),
+              phoneticNames: has('--phonetic-names'),
+              waveform: has('--waveform'),
+              referenceAudio: referenceAudioPath,
+              referenceStartMs: flag('--reference-start-ms'),
+              conditionStrength: flag('--condition-strength'),
+              addSfx: has('--add-sfx'),
+              separateTracks: has('--separate-tracks'),
+              useAudioAsReference: has('--use-audio-as-reference')
+            },
+            { hasVideo: Boolean(videoPath) }
+          )
+        : {};
+    const lyrics = kind === 'music' ? flag('--lyrics')?.trim() || undefined : undefined;
+    const instrumental = kind === 'music' && has('--instrumental') ? true : undefined;
 
     // Upload progress goes to the TUI log, not stderr (which would tear the Ink frame).
-    const imageUrl = imagePath
-      ? (await resolveMediaInput(client, imagePath, { onProgress: (line) => log(line, 'info') })).url
+    const onProgress = (line: string) => log(line, 'info');
+    const imageUrl = imagePath ? (await resolveMediaInput(client, imagePath, { onProgress })).url : undefined;
+    const videoUrl = videoPath ? (await resolveMediaInput(client, videoPath, { onProgress })).url : undefined;
+    const referenceAudioUrl = referenceAudioPath
+      ? (await resolveMediaInput(client, referenceAudioPath, { onProgress })).url
       : undefined;
 
     const label = `generate ${kind}: ${describe(prompt)}`;
@@ -380,7 +414,18 @@ registerSlash({
           return client.createSpeech({ text: prompt, voice_id: voiceId, model }, { idempotencyKey: randomUUID() });
         case 'music':
           return client.createMusic(
-            { prompt, model, duration_seconds: duration ? Number(duration) : undefined, image_url: imageUrl, negative_prompt: negativePrompt },
+            {
+              prompt,
+              model,
+              duration_seconds: duration ? Number(duration) : undefined,
+              image_url: imageUrl,
+              negative_prompt: negativePrompt,
+              lyrics,
+              force_instrumental: instrumental,
+              video_url: videoUrl,
+              ...musicExtras,
+              ...(referenceAudioUrl ? { reference_audio_url: referenceAudioUrl } : {})
+            } as any,
             { idempotencyKey: randomUUID() }
           );
         case 'sfx':
@@ -395,6 +440,40 @@ registerSlash({
 
     log(`Submitted ${label}`, 'info');
     await followJob(jobId, kind, output, log);
+  }
+});
+
+registerSlash({
+  name: 'vocals',
+  summary: 'List music vocals/styles (curated + yours). Usage: /vocals [vocal|style] [curated|own]',
+  usage: '/vocals [vocal|style] [curated|own]  ·  then /generate music "<prompt>" --vocal <id>',
+  requiresAuth: true,
+  execute: async ({ args, client, log }) => {
+    if (!client) return;
+    const query = new URLSearchParams();
+    for (const arg of args.map((a) => a.trim().toLowerCase())) {
+      if (arg === 'vocal' || arg === 'style') query.set('kind', arg);
+      else if (arg === 'curated' || arg === 'own') query.set('source', arg);
+      else {
+        log(`Unknown filter: ${arg}. Use vocal | style | curated | own.`, 'error');
+        return;
+      }
+    }
+    const qs = query.toString();
+    const response = await publicApiRequest<any>('GET', qs ? `/audio/music/vocals?${qs}` : '/audio/music/vocals');
+    const rows: any[] = Array.isArray(response?.data) ? response.data : [];
+    if (rows.length === 0) {
+      log('No vocals match.', 'info');
+      return;
+    }
+    log(
+      fmtTable(
+        rows.map((v) => [String(v.id ?? ''), String(v.name ?? ''), String(v.kind ?? ''), String(v.source ?? ''), String(v.status ?? '')]),
+        ['id', 'name', 'kind', 'source', 'status']
+      ),
+      'output'
+    );
+    log('Use one: /generate music "<prompt>" --vocal <id>', 'info');
   }
 });
 

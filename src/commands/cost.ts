@@ -149,7 +149,8 @@ export function registerCostCommand(program: Command): void {
     .option('--plan-file <path>', 'ElevenLabs composition plan JSON — its own total length is priced when -d is omitted')
     .option('--details', 'Include detailed metadata')
     .option('--timestamps', 'Include timestamps (implies --details)')
-    .action(async (_prompt: string | undefined, opts: { model: string; duration?: string; planFile?: string; details?: boolean; timestamps?: boolean }) => {
+    .option('--reference-audio <urlOrPath>', 'Price an ElevenLabs audio reference (its 30s cap bills on top) — pass the same value as on `generate music`')
+    .action(async (_prompt: string | undefined, opts: { model: string; duration?: string; planFile?: string; details?: boolean; timestamps?: boolean; referenceAudio?: string }) => {
       let compositionPlan: unknown;
       if (opts.planFile) {
         try {
@@ -164,7 +165,10 @@ export function registerCostCommand(program: Command): void {
         composition_plan: compositionPlan,
         // Same spelling `generate music` sends (undefined unless set).
         include_details: opts.details || opts.timestamps || undefined,
-        with_timestamps: opts.timestamps || undefined
+        with_timestamps: opts.timestamps || undefined,
+        // Presence-only for the price (the 30-second cap is what is quoted), so
+        // nothing is uploaded here; the quote stays spendable on the generate.
+        reference_audio_url: opts.referenceAudio || undefined
       });
     });
 
@@ -205,7 +209,7 @@ export function registerCostCommand(program: Command): void {
   cost
     .command('sfx <prompt>')
     .description('Estimate the credit cost of a sound effect generation')
-    .requiredOption('-m, --model <model>', 'Public SFX model alias')
+    .option('-m, --model <model>', 'SFX model: sfx.elevenlabs_v3 (Text to Sound v3) | sfx.elevenlabs_v1 (v2)', 'sfx.elevenlabs_v3')
     .option('-d, --duration <seconds>', 'Duration in seconds')
     .action(async (_prompt: string, opts: { model: string; duration?: string }) => {
       await runEstimate({ model: opts.model, duration_seconds: opts.duration ? Number(opts.duration) : undefined });
