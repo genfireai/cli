@@ -399,8 +399,9 @@ export async function downloadOutputs(
   const fetchImpl = options.fetchImpl ?? fetch;
   const writtenPaths: string[] = [];
 
-  if (destination && outputs.length === 1) {
-    // Single output to an explicit path.
+  if (destination && outputs.length === 1 && !(await isDirectoryDestination(destination))) {
+    // Single output to an explicit FILE path. (`-o some/dir/` or an existing
+    // directory falls through and saves inside it under the suggested name.)
     const path = await ensureDestinationDir(destination);
     await downloadOne(fetchImpl, outputs[0].url, path);
     writtenPaths.push(path);
@@ -419,6 +420,16 @@ export async function downloadOutputs(
     writtenPaths.push(target);
   }
   return writtenPaths;
+}
+
+/** `-o` names a directory: a trailing separator, or a path that already is one. */
+async function isDirectoryDestination(destination: string): Promise<boolean> {
+  if (/[\\/]$/.test(destination)) return true;
+  try {
+    return (await stat(destination)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function ensureDestinationDir(path: string): Promise<string> {
