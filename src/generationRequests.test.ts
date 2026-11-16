@@ -863,3 +863,35 @@ test('--task editing keeps the sound in the body; --task extension never does', 
   const extensionOptIn = await bothBodies([...take, '--task', 'extension', '-d', '5', '--keep-clip-audio'], 'continue @Video1');
   for (const key of ['keep_source_audio', 'generate_audio']) assert.equal(key in extensionOptIn, false);
 });
+
+// ─── Seedance 2.5 Flash: Genjudo on the speed tier ───────────────────────────
+// video.seedance_2_5_flash takes the same request shape, `task` and one-clip
+// defaults as video.seedance_2_5 (the API gates both on the 2.5 engine family).
+// Without the CLI applying them too, a Flash Genjudo run would quote 16:9 / 5 s
+// with a generated soundtrack while the API rendered and billed the clip's own.
+
+const FLASH_CLIP = ['-m', 'video.seedance_2_5_flash', '--ref-video', 'https://cdn.example/dance.mp4', '--ref-image', 'https://cdn.example/me.jpg'];
+
+test('Flash: a one-clip Genjudo run gets the same defaults 2.5 gets, identically on cost and generate', async () => {
+  inspectSeconds = 7.4;
+  inspectHasAudio = true;
+  const flash = await bothBodies(FLASH_CLIP);
+  const { model, ...flashRest } = flash;
+  const { model: _sd25, ...sd25Rest } = await bothBodies(SD25_CLIP);
+  assert.equal(model, 'video.seedance_2_5_flash');
+  assert.deepEqual(flashRest, sd25Rest, 'the same body apart from the model');
+  assert.equal(flash.follow_source, true);
+  assert.equal(flash.keep_source_audio, true);
+  const take = ['-m', 'video.seedance_2_5_flash', '--ref-video', 'https://cdn.example/take.mp4'];
+  const editing = await bothBodies([...take, '--task', 'editing'], 'relight @Video1');
+  assert.equal(editing.aspect_ratio, 'auto');
+  assert.equal(editing.keep_source_audio, true);
+  for (const key of ['follow_source', 'duration']) assert.equal(key in editing, false);
+});
+
+test('Flash: --keep-clip-audio is a Genjudo option there too; --bitrate is not sent', async () => {
+  assert.doesNotThrow(() => validateVideoFlags({ model: 'video.seedance_2_5_flash', refVideo: ['a.mp4'], keepClipAudio: true }));
+  assert.throws(() => validateVideoFlags({ model: 'video.seedance_2_5_flash', keepClipAudio: true }), /pass the clip with --ref-video/);
+  const body = await bothBodies(['-m', 'video.seedance_2_5_flash', '--bitrate', 'high', '-d', '5'], 'a fox runs');
+  assert.equal('bitrate_mode' in body, false);
+});

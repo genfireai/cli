@@ -7,7 +7,8 @@ import { bold, cyan, dim, printResult, printTable } from '../output.js';
  * `genfire genjudo` — Genfire Genjudo: motion transfer and video edit.
  *
  * Both halves are ONE `genfire generate video` call on `video.seedance_2_5`
- * with a different `--task`:
+ * (or its speed tier `video.seedance_2_5_flash`: the same flags and defaults,
+ * 480p / 720p, no draft) with a different `--task`:
  *
  *   --task reference  MOTION TRANSFER. The clip supplies the motion, your
  *                     images supply who performs it. Without -a / -d it
@@ -90,7 +91,7 @@ export function registerGediCommand(program: Command): void {
   const gedi = program
     .command('genjudo')
     .alias('gedi')
-    .description('Genfire Genjudo: motion transfer and video edit recipes for video.seedance_2_5');
+    .description('Genfire Genjudo: motion transfer and video edit recipes for video.seedance_2_5 (or video.seedance_2_5_flash)');
 
   gedi
     .command('presets')
@@ -141,6 +142,7 @@ export function registerGediCommand(program: Command): void {
           + `${dim('Run a transfer:')} ${cyan('genfire generate video "<preset prompt>" -m video.seedance_2_5 --task reference --ref-video ./dance.mp4 --ref-image ./character.png')}\n`
           + `${dim('A transfer matches the clip\'s frame and length unless you pass -a / -d. An editing run follows its source clip (one clip, 4-30s) — leave -a and -d off.')}\n`
           + `${dim('Both keep the clip\'s own sound (laid back on the result); --no-keep-clip-audio lets the model make the soundtrack.')}\n`
+          + `${dim('Faster and cheaper (480p / 720p, no --draft): swap in')} ${cyan('-m video.seedance_2_5_flash')}${dim(' — same flags; price either with')} ${cyan('genfire cost video')}\n`
         );
       });
     });

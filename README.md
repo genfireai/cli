@@ -141,6 +141,7 @@ The `--ref-image`, `--ref-video`, `--ref-audio` and `--ref-video-trim` flags tak
 - Clips are 2–30 s each and 30 s across the whole `--ref-video` pool.
 - `reference` and `editing` keep the clip's own sound by default: the clip goes in silent and its original audio is laid back on the result. Pass `--no-keep-clip-audio` for a generated soundtrack (add `--no-audio` for none). `extension` always generates sound for the new seconds (`--keep-clip-audio` has no effect there).
 - `--image` together with `--ref-image` / `--ref-video` / `--ref-audio` is not animated as a start frame: it joins the reference images after your `--ref-image` list, as the next `@ImageN`. `--bitrate` has no effect on `video.seedance_2_5`, and `genfire cost video -n` above 1 is quoted as one video (one per request).
+- `-m video.seedance_2_5_flash` (Seedance 2.5 Flash) takes every flag above and applies the same defaults, at about twice the speed and a lower per-second price (`genfire cost video` quotes both). It renders 480p or 720p only, takes up to 10 `--ref-image`, 5 `--ref-video` and 5 `--ref-audio`, and has no `--draft`.
 - Recipes with the prompts written for you: `genfire genjudo presets`.
 
 Model-specific image flags:

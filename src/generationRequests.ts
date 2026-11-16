@@ -505,10 +505,10 @@ export interface VideoFlags extends GroundingFlags {
 export function addVideoRequestOptions(cmd: Command): Command {
   cmd
     .option('-m, --model <model>', 'Public model alias, e.g. video.kling_v4 (default: the API default video model)')
-    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). Genjudo runs (video.seedance_2_5 with a --ref-video, any --task) default to auto: the clip\'s own frame — the API applies the same default to a one-clip run')
-    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 too, which never picks its own length). video.seedance_2_5 with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
-    .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
-    .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
+    .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (16:9, 9:16, 1:1, …; see limits in `genfire models get`; default 16:9). Genjudo runs (video.seedance_2_5 / video.seedance_2_5_flash with a --ref-video, any --task) default to auto: the clip\'s own frame — the API applies the same default to a one-clip run')
+    .option('-d, --duration <seconds>', 'Duration in seconds (model-dependent; default 5 — on video.seedance_2_5 / _flash too, which never pick their own length). video.seedance_2_5 / _flash with exactly one --ref-video, --task reference (or no --task) and -a left off (or auto) defaults to the clip\'s own measured length instead (the API also follows the clip when -a is the clip\'s own ratio) — rounded up to a whole second, 4-30, whether or not the clip\'s sound is kept — the same default the API applies')
+    .option('-r, --resolution <resolution>', `Output resolution, model-dependent (e.g. 480p, 720p, 1080p, 4k; 480p or 720p on video.seedance_2_5_flash, where higher runs at 720p; ${H3_MAX_RECAST_RESOLUTIONS.join(' or ')} on ${H3_MAX_RECAST_ALIAS}). Higher resolutions cost more credits.`)
+    .option('-i, --image <urlOrPath>', 'Start frame (image-to-video): URL, local path (auto-uploaded) or a completed run id — e.g. a video run\'s last_frame_url to continue that shot. On video.seedance_2_5 / _flash with any --ref-image / --ref-video / --ref-audio it is not animated: the API adds it to the reference images after your --ref-image list, as the next @ImageN')
     .option('--end-image <urlOrPath>', 'Last frame the clip lands on, paired with --image (or --start-image on Kling O3 / Kling 4.0); on video.kling_v4 it also rides beside --ref-image / --ref-video / --elements-file, start optional (each frame counts toward its 10 images). Supported where capabilities.end_frame is true (Seedance, Kling V3/O3/2.6/4.0, Hailuo 03/02 Standard, Flux 3 Max)')
     .option('--start-image <urlOrPath>', 'Kling O3 / Kling 4.0 structured start frame (start_image_url) — use with --elements-file / --multi-prompt; other models take --image')
     .option('--first-frame <urlOrPath>', 'First frame of a first/last-frame clip (needs --last-frame; models with capabilities.first_last_frame)')
@@ -516,10 +516,10 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--source-video <urlOrPath>', `Source clip to edit / extend / restyle / recast (video-to-video models — capabilities.source_video). Source-tracking edits bill the clip's measured length. On ${KLING4_ALIAS} / video.kling_v4_flash it makes the run a video EDIT: the clip to change (cite it as @Video1; 3-30s, Flash 3-20s — a longer one is cut to fit), the prompt describes the change, --ref-video clips become @Video2… (up to 4), and with -d left off the output runs the clip's length. On ${H3_MAX_RECAST_ALIAS} it is the clip whose people are recast (5-30s, no single shot over 15s; billed per second of it) — pass the photos with --ref-image and "" as the prompt if you have nothing to add. On ${H3_MAX_RELIGHT_ALIAS} it is the clip to relight (up to 15s; billed per second of it) — pass ONE lighting image with --ref-image and "" as the prompt`)
     .option('--source-trim-start <seconds>', `Kling 4.0 / Flash edit (${KLING4_ALIAS} / video.kling_v4_flash with --source-video): second of the clip where the part to edit starts (default 0). Only the window is sent, and billed; other models ignore it`)
     .option('--source-trim-duration <seconds>', 'Kling 4.0 / Flash edit: seconds of --source-video to edit, from --source-trim-start (default: to the clip\'s end, at most 30s / Flash 20s). With -d left off the output runs this length')
-    .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1 / Kling 4.0, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
-    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 5 on video.kling_v4 (cite as @Video1…; each 3-30s, 30s TOTAL together with element videos — a longer pool is trimmed to fit), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool). On video.seedance_2_5 this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
-    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5, where every window shares the 30s pool)')
-    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s), local paths or run ids — cite as Audio 1… (Hailuo 03, Wan 3.0) or @Audio1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0 (2-15s each), 10 on video.seedance_2_5 (each 2-30s and ≤15 MB, 30s TOTAL across the pool), 5 on Wan 3.0 (15s total). Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
+    .option('--ref-image <urlOrPath...>', `Reference image URL(s), local paths or run ids — cite in the prompt as Image 1, Image 2, … (Hailuo 03, Wan 3.0) or @Image1, @Image2, … (Seedance). Up to 9 on most models, 10 on Wan 3.0 / Omni Flash 1.1 / Kling 4.0 / video.seedance_2_5_flash, 30 on video.seedance_2_5. On ${H3_MAX_RECAST_ALIAS} these are the new cast: 1-${H3_MAX_RECAST_MAX_REFERENCE_IMAGES} photos, one per person, replacing the main people left to right`)
+    .option('--ref-video <urlOrPath...>', 'Reference clip URL(s), local paths or run ids — cite as Video 1… (Hailuo 03, Wan 3.0) or @Video1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0, 5 on Wan 3.0 (15s total), 5 on video.kling_v4 (cite as @Video1…; each 3-30s, 30s TOTAL together with element videos — a longer pool is trimmed to fit), 10 on video.seedance_2_5 (each 2-30s, 30s TOTAL across the pool), 5 on video.seedance_2_5_flash (same rules). On video.seedance_2_5 / _flash this is also the clip --task edits, extends or transfers motion from: --task editing and extension take exactly ONE clip, and an edit needs at least 4s of it. A prompt typed after this list is picked out of it (or put the prompt first)')
+    .option('--ref-video-trim <spec...>', 'Time window for a --ref-video clip, as N:START-END in seconds (0-based N), e.g. --ref-video-trim 1:3-8 uses seconds 3–8 of the second clip. Only the window is sent. Must fit the model\'s per-clip cap (3s Omni Flash 1.1, 15s Hailuo 03 / Wan 3.0, 30s Seedance 2.0; 2-30s on video.seedance_2_5 / _flash, where every window shares the 30s pool)')
+    .option('--ref-audio <urlOrPath...>', 'Reference audio URL(s), local paths or run ids — cite as Audio 1… (Hailuo 03, Wan 3.0) or @Audio1… (Seedance). Up to 3 on Hailuo 03 and Seedance 2.0 (2-15s each), 10 on video.seedance_2_5 (each 2-30s and ≤15 MB, 30s TOTAL across the pool), 5 on video.seedance_2_5_flash (same rules), 5 on Wan 3.0 (15s total). Gives a character a consistent voice. Needs at least one --ref-image or --ref-video alongside it')
     .option('--keyframe <FRAME:urlOrPath>', 'Pin an image at a 24 fps frame index, e.g. --keyframe 0:start.png --keyframe 96:end.png (Flux 3 / Flux 3 Max keyframes-to-video; capabilities.keyframes). Repeatable', collect, [] as string[])
     .option('--draft-cache-url <url>', 'Flux 3 draft-enhance: the draft_cache_url a previous /draft run returned')
     .option('--file-url <urlOrPath>', 'Document to ground the clip on (Wan 3.0 reference-to-video; turns thinking on)')
@@ -531,11 +531,11 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--camera-path <preset>', `H3 Max Multi Angle camera move: ${CAMERA_PATH_IDS.join(', ')}`)
     .option('--camera-trajectory <file>', 'H3 Max Multi Angle explicit camera path: JSON array of 2-12 { time, azimuth, elevation, distance } keyframes')
     .option('--no-audio', 'Disable audio generation if the model supports it')
-    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast only — it has no effect on video.seedance_2_5 (not sent) or any other model (ignored by the API)')
+    .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast only — it has no effect on video.seedance_2_5 / _flash (not sent) or any other model (ignored by the API)')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
-    .option('--draft', 'video.seedance_2_5 only: render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p, within 7 days')
-    .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it; with ONE clip and -a / -d left off it MATCHES THE CLIP, its frame and its measured length), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need exactly one --ref-video. A video.seedance_2_5 run with a --ref-video and no --task runs as reference. With ONE clip, reference and editing keep the clip\'s own sound (when it has a soundtrack and no --ref-audio is sent) unless you pass --no-keep-clip-audio or --no-audio. These are exactly the defaults the API applies to a one-clip run — never to two or more clips, never to extension — so leaving them to the CLI or the API renders the same clip. Recipes with the prompts written for you: genfire genjudo presets')
-    .option('--keep-clip-audio', 'Genjudo (video.seedance_2_5 with a --ref-video): keep the CLIP\'S OWN SOUND. The clip goes in silent and its original audio is laid back on the result, instead of a generated soundtrack. The default for a ONE-clip --task reference (also when --task is omitted) or --task editing run whose clip has a soundtrack, when no --ref-audio is sent — as in the web Genjudo and the API. No effect on --task extension (the new seconds have no source audio)')
+    .option('--draft', 'video.seedance_2_5 only (video.seedance_2_5_flash has no draft — the API refuses it): render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p, within 7 days')
+    .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 and video.seedance_2_5_flash (faster and cheaper, 480p / 720p) only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it; with ONE clip and -a / -d left off it MATCHES THE CLIP, its frame and its measured length), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need exactly one --ref-video. A video.seedance_2_5 / _flash run with a --ref-video and no --task runs as reference. With ONE clip, reference and editing keep the clip\'s own sound (when it has a soundtrack and no --ref-audio is sent) unless you pass --no-keep-clip-audio or --no-audio. These are exactly the defaults the API applies to a one-clip run — never to two or more clips, never to extension — so leaving them to the CLI or the API renders the same clip. Recipes with the prompts written for you: genfire genjudo presets')
+    .option('--keep-clip-audio', 'Genjudo (video.seedance_2_5 / _flash with a --ref-video): keep the CLIP\'S OWN SOUND. The clip goes in silent and its original audio is laid back on the result, instead of a generated soundtrack. The default for a ONE-clip --task reference (also when --task is omitted) or --task editing run whose clip has a soundtrack, when no --ref-audio is sent — as in the web Genjudo and the API. No effect on --task extension (the new seconds have no source audio)')
     .option('--no-keep-clip-audio', 'Genjudo: let the model make the soundtrack instead of keeping the clip\'s own — sends keep_source_audio false, so the API\'s keep-the-clip-sound default does not apply either (add --no-audio for a silent result)')
     .option('--style <style>', `H3 Max Styles look: ${H3_MAX_STYLE_IDS.join(', ')}. Runs on ${H3_MAX_STYLES_ALIAS} (picked for you when -m is omitted): 5-15s, fixed 768p with audio, one flat rate for every look. Optional --image first frame; no --end-image or references`)
     .option('--damage-level <level>', `With --style vhs only: tape wear, ${H3_MAX_DAMAGE_LEVELS.join(', ')} (default medium)`)
@@ -734,7 +734,7 @@ export function validateVideoFlags(opts: VideoFlags): void {
   }
   if (opts.keepClipAudio === true) {
     if (!isGenjudoModel(opts.model)) {
-      throw new CliError(`--keep-clip-audio is a Genjudo option — run it on -m ${GENJUDO_MODEL}.`, 'unsupported_genjudo_option');
+      throw new CliError(`--keep-clip-audio is a Genjudo option — run it on -m ${GENJUDO_MODEL} (or ${GENJUDO_FLASH_MODEL}).`, 'unsupported_genjudo_option');
     }
     if (!opts.refVideo?.length) {
       throw new CliError('--keep-clip-audio keeps a clip\'s own sound — pass the clip with --ref-video.', 'keep_clip_audio_requires_reference_video');
@@ -764,16 +764,21 @@ export function validateVideoFlags(opts: VideoFlags): void {
   }
 }
 
-// ─── Genfire Genjudo defaults (video.seedance_2_5 + --task) ──────────────────
+// ─── Genfire Genjudo defaults (video.seedance_2_5 / _flash + --task) ─────────
 
 const GENJUDO_MODEL = 'video.seedance_2_5';
+// Seedance 2.5's speed tier: the same request shape, `task` and one-clip
+// defaults (the API gates both on the 2.5 engine family), at 480p / 720p with
+// smaller reference pools and no draft. Everything below treats it as 2.5.
+const GENJUDO_FLASH_MODEL = 'video.seedance_2_5_flash';
+const GENJUDO_MODELS: ReadonlySet<string> = new Set([GENJUDO_MODEL, GENJUDO_FLASH_MODEL]);
 // Shortest / longest single Seedance 2.5 pass — the web Genjudo's
-// GEDI_MIN/MAX_DURATION_SECONDS (frontend buildGediRequest).
+// GEDI_MIN/MAX_DURATION_SECONDS (frontend buildGediRequest). Flash shares both.
 const GENJUDO_MIN_SECONDS = 4;
 const GENJUDO_MAX_SECONDS = 30;
 
 function isGenjudoModel(model?: string): boolean {
-  return String(model ?? '').trim().toLowerCase() === GENJUDO_MODEL;
+  return GENJUDO_MODELS.has(String(model ?? '').trim().toLowerCase());
 }
 
 /**
@@ -987,7 +992,7 @@ export async function buildVideoRequest(
     // 4.0 has no audio toggle at all (the API ignores it), so --no-audio is
     // not sent there.
     generate_audio: isKling4Alias(opts.model) ? undefined : opts.audio === false ? false : genjudo.generate_audio,
-    // video.seedance_2_5 has no encode setting: --bitrate has no effect there,
+    // video.seedance_2_5 / _flash have no encode setting: --bitrate has no effect there,
     // so it is not sent (the same body for `cost video` and `generate video`).
     bitrate_mode: isGenjudoModel(opts.model) ? undefined : (opts.bitrate ?? opts.bitrateMode),
     task: opts.task?.trim().toLowerCase(),
