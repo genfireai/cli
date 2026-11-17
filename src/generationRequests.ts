@@ -284,7 +284,7 @@ export function addImageRequestOptions(cmd: Command): Command {
     .option('-r, --resolution <res>', 'Output resolution: 1K, 2K, 4K (image.grok_imagine_pro / image.grok_imagine_2 = 1K or 2K; image.nano_banana_2 / image.nano_banana_2_1 / image.nano_banana_pro = 1K, 2K or 4K; image.ideogram_v4_5 = 1K or 2K, default 2K, same price; image.krea_3 = 1K or 2K, default 1K, 2K costs 4x; image.seedream_v55 = 1K, 1.5K, 2K or 3K, default 2K, 4K runs at 3K, priced per tier; image.minimax_h3_image / image.minimax_h3_image_highspeed = 1K, 2K or 4K, default 2K, 1K and 2K same price)')
     .option('--edit-precision <level>', `Edit precision: ${IMAGE_EDIT_PRECISIONS.join(', ')} (image.ideogram_v4_5 edits with -i only). high = Precise Edit: keeps every pixel the prompt does not name, same price`)
     .option('--output-format <format>', `Output: ${IMAGE_OUTPUT_FORMATS.join(', ')}. image.seedream_v55: png or jpeg, same price. image.gpt_image_26_sunburst / image.gpt_image_26_flare: png, gif or svg — gif = ONE animated GIF, billed ×ceil(frames ÷ 6); svg = ONE vector (with -i the edit renders, then is vectorized), plus a vectorizing fee. Both make one output whatever -n says`)
-    .option('--reasoning-effort <level>', `How much GPT Image 2.6 plans before drawing: ${IMAGE_REASONING_EFFORTS.join(', ')} (default high — best for dense text and layouts; lower is faster). No extra cost`)
+    .option('--reasoning-effort <level>', `How much GPT Image 2.6 plans before drawing: ${IMAGE_REASONING_EFFORTS.join(', ')} (default low — fastest; high is best for dense text and layouts). No extra cost`)
     .option('--complexity <level>', 'Alias of --reasoning-effort (OpenAI\'s name for it)')
     .option('--frame-count <n>', 'GIF frames, 2-16 (default 9; with --output-format gif). At most 12 are sent and billed — the run\'s notes say so')
     .option('--frame-duration-ms <ms>', 'Milliseconds per GIF frame, 20-2000 on a 10 ms grid (default 200; with --output-format gif)')
@@ -1117,7 +1117,12 @@ export interface MusicExtraFlags {
   addSfx?: boolean;
   separateTracks?: boolean;
   useAudioAsReference?: boolean;
+  /** Models that take them (see `genfire models get <model>`): a melody to follow, and the singer's gender. */
+  melodyAudio?: string;
+  vocalGender?: string;
 }
+
+export const MUSIC_VOCAL_GENDERS = ['female', 'male'] as const;
 
 /**
  * The 2026-11 ElevenLabs music fields of `genfire generate music`, as wire
@@ -1147,6 +1152,16 @@ export function buildMusicExtraFields(opts: MusicExtraFlags, context: { hasVideo
   }
   if (opts.phoneticNames) out.use_phonetic_names = true;
   if (opts.waveform) out.with_waveform = true;
+  if (opts.vocalGender !== undefined) {
+    const gender = opts.vocalGender.trim().toLowerCase();
+    if (!(MUSIC_VOCAL_GENDERS as readonly string[]).includes(gender)) {
+      throw new CliError(`Invalid --vocal-gender: ${opts.vocalGender}. Use ${MUSIC_VOCAL_GENDERS.join(' or ')}.`, 'invalid_vocal_gender');
+    }
+    out.vocal_gender = gender;
+  }
+  if (opts.melodyAudio !== undefined && context.hasVideo) {
+    throw new CliError('--melody-audio is for prompt / lyrics mode, not --video.', 'invalid_arguments');
+  }
   if (opts.referenceAudio !== undefined && context.hasVideo) {
     throw new CliError('--reference-audio is for prompt / plan mode; with --video use --use-audio-as-reference.', 'invalid_arguments');
   }

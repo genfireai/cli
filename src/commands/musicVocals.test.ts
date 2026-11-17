@@ -66,6 +66,14 @@ test('music extras: misplaced or misspelled flags fail before any upload', () =>
   assert.throws(() => buildMusicExtraFields({ addSfx: true }, { hasVideo: false }), CliError);
 });
 
+test('music extras: a vocal gender in any casing maps to its wire field; a melody is resolved by the caller', () => {
+  assert.deepEqual(buildMusicExtraFields({ vocalGender: ' Female ' }, { hasVideo: false }), { vocal_gender: 'female' });
+  // The melody file is uploaded by the command, not mapped here.
+  assert.deepEqual(buildMusicExtraFields({ melodyAudio: 'melody.mp3' }, { hasVideo: false }), {});
+  assert.throws(() => buildMusicExtraFields({ vocalGender: 'robot' }, { hasVideo: false }), CliError);
+  assert.throws(() => buildMusicExtraFields({ melodyAudio: 'melody.mp3' }, { hasVideo: true }), CliError);
+});
+
 test('vocals and stems register their subcommands', () => {
   const program = new Command();
   registerMusicVocalsCommands(program);

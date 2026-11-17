@@ -150,7 +150,10 @@ export function registerCostCommand(program: Command): void {
     .option('--details', 'Include detailed metadata')
     .option('--timestamps', 'Include timestamps (implies --details)')
     .option('--reference-audio <urlOrPath>', 'Price an ElevenLabs audio reference (its 30s cap bills on top) — pass the same value as on `generate music`')
-    .action(async (_prompt: string | undefined, opts: { model: string; duration?: string; planFile?: string; details?: boolean; timestamps?: boolean; referenceAudio?: string }) => {
+    .option('--with-lyrics', 'Price the song as one with lyrics (some models charge less for lyrics than for a prompt alone)')
+    .option('--instrumental', 'Price an instrumental (models with a separate instrumental price)')
+    .option('--melody-audio <urlOrPath>', 'Price a melody reference (models that take one)')
+    .action(async (_prompt: string | undefined, opts: { model: string; duration?: string; planFile?: string; details?: boolean; timestamps?: boolean; referenceAudio?: string; withLyrics?: boolean; instrumental?: boolean; melodyAudio?: string }) => {
       let compositionPlan: unknown;
       if (opts.planFile) {
         try {
@@ -168,7 +171,11 @@ export function registerCostCommand(program: Command): void {
         with_timestamps: opts.timestamps || undefined,
         // Presence-only for the price (the 30-second cap is what is quoted), so
         // nothing is uploaded here; the quote stays spendable on the generate.
-        reference_audio_url: opts.referenceAudio || undefined
+        reference_audio_url: opts.referenceAudio || undefined,
+        // Presence-only, like the reference: which price applies, not the words.
+        lyrics: opts.withLyrics ? '(lyrics)' : undefined,
+        force_instrumental: opts.instrumental || undefined,
+        melody_audio_url: opts.melodyAudio || undefined
       });
     });
 

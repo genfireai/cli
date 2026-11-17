@@ -35,6 +35,7 @@ import {
   buildMusicExtraFields,
   MUSIC_CONDITION_STRENGTHS,
   MUSIC_GENERATION_MODES,
+  MUSIC_VOCAL_GENDERS,
   type MusicExtraFlags
 } from '../generationRequests.js';
 
@@ -486,6 +487,8 @@ export function registerGenerateCommands(program: Command): void {
     .option('--add-sfx', 'With --video: add sound effects cued to the footage')
     .option('--separate-tracks', 'With --video --add-sfx: deliver music and SFX as separate files (output.sfx_url)')
     .option('--use-audio-as-reference', 'With --video: follow the video\'s own soundtrack as a reference')
+    .option('--melody-audio <urlOrPath>', 'A melody for the song to follow, on models that take one (URL, local file or run id; see `genfire models get <model>`)')
+    .option('--vocal-gender <gender>', `Singer gender on models that take it, with lyrics: ${MUSIC_VOCAL_GENDERS.join(' | ')}`)
     .action(async (prompt: string | undefined, opts: CommonGenerateOptions & MusicExtraFlags & {
       model?: string; duration?: string; planFile?: string; seed?: string; flexSections?: boolean;
       format?: string; instrumental?: boolean; imageUrl?: string; negativePrompt?: string;
@@ -493,7 +496,9 @@ export function registerGenerateCommands(program: Command): void {
       video?: string; tag?: string[]; details?: boolean; timestamps?: boolean; storeForInpainting?: boolean;
     }) => {
       const compositionPlan = opts.planFile ? await readMusicPlanFile(opts.planFile) : undefined;
-      if (!prompt && !compositionPlan) {
+      // Lyrics alone are a complete request on the models that sing supplied
+      // words with no description (the API says so when a model needs a prompt).
+      if (!prompt && !compositionPlan && !opts.lyrics && !opts.lyricsFile) {
         throw new CliError('Provide a prompt or --plan-file.', 'missing_prompt');
       }
       if (prompt && compositionPlan) {
@@ -521,6 +526,7 @@ export function registerGenerateCommands(program: Command): void {
       const client = await createClient();
       const videoUrl = opts.video ? (await resolveMediaInput(client, opts.video)).url : undefined;
       const referenceAudioUrl = opts.referenceAudio ? (await resolveMediaInput(client, opts.referenceAudio)).url : undefined;
+      const melodyAudioUrl = opts.melodyAudio ? (await resolveMediaInput(client, opts.melodyAudio)).url : undefined;
       const run = await client.createMusic(
         {
           prompt,
@@ -544,6 +550,7 @@ export function registerGenerateCommands(program: Command): void {
           guidance_scale: opts.guidance ? Number(opts.guidance) : undefined,
           ...extras,
           ...(referenceAudioUrl ? { reference_audio_url: referenceAudioUrl } : {}),
+          ...(melodyAudioUrl ? { melody_audio_url: melodyAudioUrl } : {}),
           ...scopeFields(opts)
         } as any,
         { idempotencyKey: randomUUID() }
