@@ -508,6 +508,14 @@ test('draft-final renders and prices the draft by id, keyed, with --project file
 
   const quoted = await runCli(['cost', 'draft-final', 'run_draft1']);
   assert.ok(quoted.some((c) => c.method === 'POST' && c.url.endsWith('/videos/generations/run_draft1/final/estimate')));
+  assert.deepEqual(bodyOf(quoted, '/videos/generations/run_draft1/final/estimate'), {});
+});
+
+test('draft-final --resolution 4k renders and prices the 4k final', async () => {
+  const uhd = bodyOf(await runCli(['generate', 'draft-final', 'run_draft1', '--resolution', '4k', '--no-wait']), '/videos/generations/run_draft1/final');
+  assert.deepEqual(uhd, { resolution: '4k' });
+  const quoted = bodyOf(await runCli(['cost', 'draft-final', 'run_draft1', '-r', '4k']), '/videos/generations/run_draft1/final/estimate');
+  assert.deepEqual(quoted, { resolution: '4k' });
 });
 
 test('draftFinalPath refuses anything that is not an id', () => {

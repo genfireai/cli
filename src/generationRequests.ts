@@ -533,7 +533,7 @@ export function addVideoRequestOptions(cmd: Command): Command {
     .option('--no-audio', 'Disable audio generation if the model supports it')
     .option('--bitrate <mode>', 'Output encode quality: standard or high (high = larger, higher-quality file at no extra cost). Seedance 2.0 Standard/Fast only — it has no effect on video.seedance_2_5 / _flash (not sent) or any other model (ignored by the API)')
     .option('--bitrate-mode <mode>', 'Alias of --bitrate (kept for scripts written before --bitrate existed)')
-    .option('--draft', 'video.seedance_2_5 only (video.seedance_2_5_flash has no draft — the API refuses it): render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p, within 7 days')
+    .option('--draft', 'video.seedance_2_5 only (video.seedance_2_5_flash has no draft — the API refuses it): render a 480p PREVIEW at the 480p price (-r is ignored). Happy with it? `genfire generate draft-final <run_id>` renders that same shot in native 1080p (or `--resolution 4k`), within 7 days')
     .option('--task <task>', 'GENFIRE GENJUDO, video.seedance_2_5 and video.seedance_2_5_flash (faster and cheaper, 480p / 720p) only: reference (motion transfer — the --ref-video supplies the motion, --ref-image supplies who performs it; with ONE clip and -a / -d left off it MATCHES THE CLIP, its frame and its measured length), editing (video edit — re-light, swap, clean up the --ref-video itself; the output follows the source, so leave -a and -d off) or extension (continue the clip). editing and extension need exactly one --ref-video. A video.seedance_2_5 / _flash run with a --ref-video and no --task runs as reference. With ONE clip, reference and editing keep the clip\'s own sound (when it has a soundtrack and no --ref-audio is sent) unless you pass --no-keep-clip-audio or --no-audio. These are exactly the defaults the API applies to a one-clip run — never to two or more clips, never to extension — so leaving them to the CLI or the API renders the same clip. Recipes with the prompts written for you: genfire genjudo presets')
     .option('--keep-clip-audio', 'Genjudo (video.seedance_2_5 / _flash with a --ref-video): keep the CLIP\'S OWN SOUND. The clip goes in silent and its original audio is laid back on the result, instead of a generated soundtrack. The default for a ONE-clip --task reference (also when --task is omitted) or --task editing run whose clip has a soundtrack, when no --ref-audio is sent — as in the web Genjudo and the API. No effect on --task extension (the new seconds have no source audio)')
     .option('--no-keep-clip-audio', 'Genjudo: let the model make the soundtrack instead of keeping the clip\'s own — sends keep_source_audio false, so the API\'s keep-the-clip-sound default does not apply either (add --no-audio for a silent result)')
@@ -1024,10 +1024,10 @@ export function videoEstimateCount(_model: string | undefined, count: string | u
   return num(count, '--count', { int: true });
 }
 
-// ─── Seedance 2.5 draft → 1080p final ────────────────────────────────────────
+// ─── Seedance 2.5 draft → 1080p / 4k final ───────────────────────────────────
 
 /**
- * The /v1 path of a draft's 1080p final (or its estimate). Takes the draft's
+ * The /v1 path of a draft's 1080p / 4k final (or its estimate). Takes the draft's
  * run id (`run_…`, or a `dash_video_…` id from `genfire runs list`) or its
  * output video_id — whatever `generate video --draft` printed.
  */
@@ -1037,6 +1037,19 @@ export function draftFinalPath(draftId: string, estimate = false): string {
     throw new CliError('Pass the draft\'s run id (run_…) from `genfire generate video --draft`, or its output video_id.', 'invalid_draft_id');
   }
   return `/videos/generations/${encodeURIComponent(id)}/final${estimate ? '/estimate' : ''}`;
+}
+
+/**
+ * The body of a draft-final render or estimate: `resolution` only when sent
+ * (the API reads `4k` / `2160p` as 4k and anything else as the 1080p default,
+ * so it is passed through, not validated here), `project_id` on a render.
+ */
+export function draftFinalBody(opts: { resolution?: string; project?: string }): Record<string, string> {
+  const resolution = typeof opts.resolution === 'string' ? opts.resolution.trim() : '';
+  return {
+    ...(resolution ? { resolution } : {}),
+    ...(opts.project ? { project_id: opts.project } : {}),
+  };
 }
 
 // ─── Speech ──────────────────────────────────────────────────────────────────

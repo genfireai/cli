@@ -28,6 +28,7 @@ import {
   type ImageFlags,
   type VideoFlags,
   buildSpeechExtras,
+  draftFinalBody,
   draftFinalPath,
   recoverTrailingPrompt,
   VIDEO_VARIADIC_FLAGS,
@@ -276,17 +277,18 @@ export function registerGenerateCommands(program: Command): void {
         { idempotencyKey: randomUUID() }
       );
       if (opts.draft) {
-        process.stderr.write(`${dim('Draft (480p). For the 1080p final of this shot:')} genfire generate draft-final ${run.id}\n`);
+        process.stderr.write(`${dim('Draft (480p). For the 1080p (or --resolution 4k) final of this shot:')} genfire generate draft-final ${run.id}\n`);
       }
       await maybeFinish(client, run.id, 'video', opts);
     });
 
-  // ---- Seedance 2.5 draft → 1080p final ----
+  // ---- Seedance 2.5 draft → 1080p / 4k final ----
   // Not commonOptions: the final bills whoever paid for the draft, so --team
   // would only 400, and it has no quote token to spend.
   generate
     .command('draft-final <draftId>')
-    .description('Render the native 1080p FINAL of a Seedance 2.5 draft (a `generate video --draft` run): the same shot — prompt, references, duration, ratio, audio — as a new run. Bills what a direct 1080p render costs; price it first with `genfire cost draft-final <draftId>`. Within 7 days of the draft')
+    .description('Render the native 1080p (or --resolution 4k) FINAL of a Seedance 2.5 draft (a `generate video --draft` run): the same shot — prompt, references, duration, ratio, seed, audio — as a new run. Bills what a direct render at that resolution costs; price it first with `genfire cost draft-final <draftId>`. Within 7 days of the draft')
+    .option('-r, --resolution <resolution>', 'Final resolution: 1080p (default) or 4k')
     .option('-o, --output <path>', 'Where to save the output. Single file path or directory; defaults to cwd')
     .option('--no-download', "Don't download outputs locally; only print the URLs")
     .option('--no-wait', "Don't wait for the run to finish; print the queued run and exit")
@@ -294,12 +296,12 @@ export function registerGenerateCommands(program: Command): void {
     .option('--wait-interval <duration>', 'Polling interval while waiting', '2s')
     .option('--project <projectId>', 'File the result into this project when it completes')
     .option('--save-last-frame', SAVE_LAST_FRAME_HELP)
-    .action(async (draftId: string, opts: CommonGenerateOptions) => {
+    .action(async (draftId: string, opts: CommonGenerateOptions & { resolution?: string }) => {
       const path = draftFinalPath(draftId);
       const client = await createClient();
       // Brand-new endpoint: not on the pinned SDK yet (see publicApiRequest).
       const run = await publicApiRequest<{ id: string }>('POST', path, {
-        body: opts.project ? { project_id: opts.project } : {},
+        body: draftFinalBody(opts),
         idempotencyKey: randomUUID()
       });
       await maybeFinish(client, run.id, 'video', opts);

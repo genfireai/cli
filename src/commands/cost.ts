@@ -14,6 +14,7 @@ import {
   type ImageFlags,
   type VideoFlags,
   buildSpeechExtras,
+  draftFinalBody,
   draftFinalPath,
   recoverTrailingPrompt,
   VIDEO_VARIADIC_FLAGS,
@@ -100,22 +101,23 @@ export function registerCostCommand(program: Command): void {
       await runEstimate(await withDefaultModel(client, body, 'video_generation'));
     });
 
-  // The 1080p final of a Seedance 2.5 draft is priced from the DRAFT's own
-  // request, so it takes the draft's id rather than generation flags.
+  // The 1080p / 4k final of a Seedance 2.5 draft is priced from the DRAFT's
+  // own request, so it takes the draft's id rather than generation flags.
   cost
     .command('draft-final <draftId>')
-    .description('Price the 1080p final of a Seedance 2.5 draft (a `generate video --draft` run id) and show until when it can be made')
-    .action(async (draftId: string) => {
+    .description('Price the 1080p (or --resolution 4k) final of a Seedance 2.5 draft (a `generate video --draft` run id) and show until when it can be made')
+    .option('-r, --resolution <resolution>', 'Final resolution to price: 1080p (default) or 4k')
+    .action(async (draftId: string, opts: { resolution?: string }) => {
       const path = draftFinalPath(draftId, true);
       const client = await createClient();
       const [estimate, credits] = await Promise.all([
-        publicApiRequest<{ model: string; credits: number; expires_at?: string; draft_run_id?: string | null; draft_video_id?: string }>('POST', path, { body: {} }),
+        publicApiRequest<{ model: string; credits: number; resolution?: string; expires_at?: string; draft_run_id?: string | null; draft_video_id?: string }>('POST', path, { body: draftFinalBody({ resolution: opts.resolution }) }),
         client.getCredits().catch(() => null)
       ]);
       printResult(
         { ...estimate, balance: credits ? { balance: credits.balance, currency: credits.currency } : undefined },
         () => {
-          process.stdout.write(`${bold(estimate.model)}  ${dim('1080p final of a draft')}\n`);
+          process.stdout.write(`${bold(estimate.model)}  ${dim(`${estimate.resolution === '4k' ? '4K' : '1080p'} final of a draft`)}\n`);
           process.stdout.write(`${dim('Cost:')}     ${cyan(String(estimate.credits))} credits\n`);
           if (estimate.expires_at) process.stdout.write(`${dim('Until:')}    ${estimate.expires_at}\n`);
           if (credits) {
@@ -123,7 +125,7 @@ export function registerCostCommand(program: Command): void {
             const tag = remaining < 0 ? yellow(`(would go negative by ${-remaining})`) : `(${remaining} remaining)`;
             process.stdout.write(`${dim('Balance:')}  ${credits.balance} ${tag}\n`);
           }
-          process.stdout.write(`${dim(`Render it with: genfire generate draft-final ${draftId.trim()}`)}\n`);
+          process.stdout.write(`${dim(`Render it with: genfire generate draft-final ${draftId.trim()}${estimate.resolution === '4k' ? ' --resolution 4k' : ''}`)}\n`);
         }
       );
     });
